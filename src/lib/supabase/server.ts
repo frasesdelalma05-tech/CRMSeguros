@@ -25,6 +25,30 @@ export function createServerClient() {
 }
 
 /**
+ * Supabase Anon Client - For server-side sign-in operations
+ * Uses the anon key which is required for signInWithPassword.
+ * The service role key must NOT be used for signInWithPassword as it bypasses
+ * normal auth flows and may cause unexpected failures.
+ */
+export function createAnonClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!supabaseUrl || !anonKey) {
+    throw new Error(
+      'Missing Supabase environment variables: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY'
+    )
+  }
+
+  return createClient<Database>(supabaseUrl, anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  })
+}
+
+/**
  * Create a Supabase client that validates the user's session from the request
  * Used in API route handlers to get the authenticated user
  */

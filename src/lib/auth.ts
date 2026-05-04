@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { createServerClient, getAuthenticatedUser } from '@/lib/supabase/server';
+import { createServerClient, createAnonClient, getAuthenticatedUser } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 
 // ============================================================
@@ -164,9 +164,11 @@ export function authenticateRequest(headers: Headers): TokenPayload | null {
 
 /**
  * Supabase Auth: Sign in with email and password
+ * Uses the ANON key (not service role) because signInWithPassword
+ * requires the standard auth flow which the service role key bypasses.
  */
 export async function supabaseSignIn(email: string, password: string) {
-  const supabase = createServerClient();
+  const supabase = createAnonClient();
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email,

@@ -149,7 +149,7 @@ const PERMISSIONS: { name: string; description: string; module: string; action: 
 function getPermissionsForRole(roleName: string, permMap: Map<string, string>): string[] {
   const permIds: string[] = [];
 
-  const all = () => permMap.values().toArray();
+  const all = () => Array.from(permMap.values());
   const byModule = (mod: string) => {
     const ids: string[] = [];
     permMap.forEach((id, name) => {
@@ -465,10 +465,10 @@ async function main() {
       isActive: true,
     };
 
-    // Only set password if not using Supabase Auth (legacy fallback)
-    if (!supabaseId) {
-      updateData.password = await bcrypt.hash(adminPassword, 10);
-    }
+    // Always store bcrypt password as fallback, even when using Supabase Auth.
+    // This ensures the user can still log in via legacy auth if Supabase Auth
+    // is unavailable or misconfigured.
+    updateData.password = await bcrypt.hash(adminPassword, 10);
 
     if (supabaseId) {
       updateData.supabaseId = supabaseId;
@@ -489,12 +489,10 @@ async function main() {
       isActive: true,
     };
 
-    // Only set password if not using Supabase Auth (legacy fallback)
-    if (!supabaseId) {
-      createData.password = await bcrypt.hash(adminPassword, 10);
-    } else {
-      createData.password = null;
-    }
+    // Always store bcrypt password as fallback, even when using Supabase Auth.
+    // This ensures the user can still log in via legacy auth if Supabase Auth
+    // is unavailable or misconfigured.
+    createData.password = await bcrypt.hash(adminPassword, 10);
 
     await prisma.user.create({
       data: createData as any,
@@ -505,7 +503,10 @@ async function main() {
   // ==========================================
   // AUDIT LOG
   // ==========================================
-  const adminUser = await prisma.user.findUnique({ where: { email: adminEmail } });
+  const adminUser = await prisma.user.findUnique({
+    where: { email: adminEmail },
+    include: { role: true },
+  });
   if (adminUser) {
     await prisma.auditLog.create({
       data: {
@@ -516,6 +517,16 @@ async function main() {
         details: JSON.stringify({ email: adminEmail, role: 'super_administrador', method: 'seed-prod' }),
       },
     });
+
+    // Verification log — confirm the user state is correct for login
+    console.log('');
+    console.log('📋 Super admin user verification:');
+    console.log(`   email:       ${adminUser.email}`);
+    console.log(`   id:          ${adminUser.id}`);
+    console.log(`   supabaseId:  ${adminUser.supabaseId ?? '(none)'}`);
+    console.log(`   hasPassword: ${!!adminUser.password}`);
+    console.log(`   isActive:    ${adminUser.isActive}`);
+    console.log(`   role:        ${adminUser.role?.name ?? '(none)'}`);
   }
 
   console.log('');
