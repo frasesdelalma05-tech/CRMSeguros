@@ -3,19 +3,19 @@
   "version": "0.2.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
-    "build": "next build",
-    "postinstall": "prisma generate",
-    "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
-    "lint": "eslint .",
-    "db:push": "prisma db push",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset",
-    "db:seed": "bun prisma/seed.ts",
-    "db:seed:demo": "SEED_MODE=demo bun prisma/seed-demo.ts",
-    "db:seed:prod": "dotenv -e .env.local -- cross-env SEED_MODE=prod tsx prisma/seed-prod.ts"
-  },
+  "dev": "next dev -p 3000",
+  "build": "next build",
+  "postinstall": "prisma generate",
+  "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+  "lint": "eslint .",
+  "db:push": "dotenv -e .env.local -- prisma db push",
+  "db:generate": "prisma generate",
+  "db:migrate": "prisma migrate dev",
+  "db:reset": "prisma migrate reset",
+  "db:seed": "bun prisma/seed.ts",
+  "db:seed:demo": "SEED_MODE=demo bun prisma/seed-demo.ts",
+  "db:seed:prod": "dotenv -e .env.local -- cross-env SEED_MODE=prod tsx prisma/seed-prod.ts"
+},
   "prisma": {
     "seed": "bun prisma/seed.ts"
   },
