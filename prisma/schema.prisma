@@ -1,0 +1,529 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ROLES & PERMISSIONS
+// ============================================================
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique // super_administrador, administrador, corredor, atencion_cliente, solo_lectura
+  description String?
+  users       User[]
+  permissions Permission[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  module      String   // clients, policies, leads, campaigns, etc.
+  action      String   // read, create, update, delete
+  roles       Role[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([module])
+  @@index([action])
+  @@map("permissions")
+}
+
+// ============================================================
+// USERS
+// ============================================================
+
+model User {
+  id              String   @id @default(uuid())
+  supabaseId      String?  @unique @map("supabase_id") // Links to Supabase Auth user
+  email           String   @unique
+  password        String?  // Nullable - managed by Supabase Auth when supabaseId is set
+  name            String
+  lastName        String?  @map("last_name")
+  phone           String?
+  position        String?  // Cargo / job title
+  avatar          String?
+  documentType    String?  @default("DNI") @map("document_type") // DNI, NIE, PASSPORT
+  documentNumber  String?  @map("document_number") // Numero de documento
+  office          String?  // Zona/Oficina
+  roleId          String   @map("role_id")
+  role            Role     @relation(fields: [roleId], references: [id])
+  isActive        Boolean  @default(true) @map("is_active")
+  lastLogin       DateTime? @map("last_login")
+  refreshToken    String?  @map("refresh_token") // Legacy - kept for backward compat
+
+  // Admin/Manager relationships
+  createdById     String?  @map("created_by_id") // User who created this user
+  createdBy       User?    @relation("UserCreatedBy", fields: [createdById], references: [id])
+  managerId       String?  @map("manager_id") // Admin responsible for this user (corredor)
+  manager         User?    @relation("UserManager", fields: [managerId], references: [id])
+
+  assignedClients   Client[] @relation("AgentClients")
+  assignedLeads     Lead[]   @relation("AgentLeads")
+  soldPolicies      Policy[] @relation("AgentPolicies")
+  ownedPolicies     Policy[] @relation("PolicyOwnerAgent")
+  createdClients    Client[] @relation("ClientCreatedBy")
+  updatedClients    Client[] @relation("ClientUpdatedBy")
+  createdPolicies   Policy[] @relation("PolicyCreatedBy")
+  appointments    Appointment[]
+  tasks           Task[]   @relation("TaskAssignee")
+  auditLogs       AuditLog[]
+  campaigns       Campaign[] @relation("CampaignResponsible")
+
+  // Reverse relations for admin/manager
+  createdUsers    User[]   @relation("UserCreatedBy")  // Users this user created
+  managedUsers    User[]   @relation("UserManager")    // Users this user manages
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@index([roleId])
+  @@index([supabaseId])
+  @@index([createdById])
+  @@index([managerId])
+  @@map("users")
+}
+
+// ============================================================
+// CLIENTS
+// ============================================================
+
+model Client {
+  id              String   @id @default(uuid())
+  documentType    String   @default("DNI") @map("document_type") // DNI, NIE, PASSPORT
+  documentNumber  String?  @map("document_number") // Numero de documento (DNI/NIE/Pasaporte)
+  name            String
+  lastName        String   @map("last_name")
+  email           String
+  phone           String?
+  mobile          String?
+  address         String?
+  city            String?
+  province        String?
+  postalCode      String?  @map("postal_code")
+  country         String   @default("España")
+  birthDate       DateTime? @map("birth_date")
+  status          String   @default("activo") // activo, inactivo, prospecto, baja
+  source          String?  // web, referido, campana, cold_call, evento, otro
+  ownerAgentId    String?  @map("owner_agent_id") // Corredor/agente responsable del cliente
+  ownerAgent      User?    @relation("AgentClients", fields: [ownerAgentId], references: [id])
+  createdById     String?  @map("created_by_id") // Usuario que creo el cliente
+  createdBy       User?    @relation("ClientCreatedBy", fields: [createdById], references: [id])
+  updatedById     String?  @map("updated_by_id") // Ultimo usuario que actualizo el cliente
+  updatedBy       User?    @relation("ClientUpdatedBy", fields: [updatedById], references: [id])
+  rgpdConsent     Boolean  @default(false) @map("rgpd_consent")
+  rgpdConsentDate DateTime? @map("rgpd_consent_date")
+  observations    String?
+  tags            String?  // comma-separated tags
+  policies        Policy[]
+  leads           Lead[]
+  opportunities   Opportunity[]
+  interactions    Interaction[]
+  documents       Document[]
+  appointments    Appointment[]
+  incidents       Incident[]
+  loyaltyScore    LoyaltyScore?
+  campaignMembers CampaignMember[]
+  tasks           Task[]
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@index([ownerAgentId])
+  @@index([status])
+  @@index([email])
+  @@index([documentType])
+  @@map("clients")
+}
+
+// ============================================================
+// LEADS & OPPORTUNITIES
+// ============================================================
+
+model Lead {
+  id              String       @id @default(uuid())
+  clientId        String       @map("client_id")
+  client          Client       @relation(fields: [clientId], references: [id])
+  agentId         String?      @map("agent_id")
+  agent           User?        @relation("AgentLeads", fields: [agentId], references: [id])
+  source          String?      // web, referido, campana, cold_call, evento
+  status          String       @default("nuevo") // nuevo, contactado, cita_programada, en_estudio, propuesta_enviada, negociacion, ganado, perdido
+  estimatedPremium Float?      @map("estimated_premium")
+  probability     Int          @default(0) // 0-100
+  product         String?
+  productId       String?      @map("product_id")
+  notes           String?
+  nextAction      String?      @map("next_action")
+  nextActionDate  DateTime?    @map("next_action_date")
+  closingDate     DateTime?    @map("closing_date")
+  opportunities   Opportunity[]
+  interactions    Interaction[]
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  deletedAt       DateTime?    @map("deleted_at")
+
+  @@index([clientId])
+  @@index([agentId])
+  @@index([status])
+  @@map("leads")
+}
+
+model Opportunity {
+  id              String    @id @default(uuid())
+  clientId        String    @map("client_id")
+  client          Client    @relation(fields: [clientId], references: [id])
+  leadId          String?   @map("lead_id")
+  lead            Lead?     @relation(fields: [leadId], references: [id])
+  product         String
+  productId       String?   @map("product_id")
+  estimatedPremium Float    @map("estimated_premium")
+  probability     Int       @default(0)
+  status          String    @default("nuevo") // nuevo, contactado, cita_programada, en_estudio, propuesta_enviada, negociacion, ganado, perdido
+  agentId         String?   @map("agent_id")
+  closingDate     DateTime? @map("closing_date")
+  notes           String?
+  nextAction      String?   @map("next_action")
+  nextActionDate  DateTime? @map("next_action_date")
+  tasks           Task[]
+  documents       Document[]
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@index([clientId])
+  @@index([leadId])
+  @@index([status])
+  @@map("opportunities")
+}
+
+// ============================================================
+// INSURANCE PRODUCTS
+// ============================================================
+
+model InsuranceProduct {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  category    String   // vida, hogar, salud, decesos, etc.
+  description String?
+  basePremium Float?   @map("base_premium")
+  coverages   String?  // JSON string of coverage list
+  isActive    Boolean  @default(true) @map("is_active")
+  policies    Policy[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([category])
+  @@index([isActive])
+  @@map("insurance_products")
+}
+
+// ============================================================
+// POLICIES
+// ============================================================
+
+model Policy {
+  id              String            @id @default(uuid())
+  policyNumber    String            @unique @map("policy_number")
+  clientId        String            @map("client_id")
+  client          Client            @relation(fields: [clientId], references: [id])
+  productId       String?           @map("product_id")
+  product         InsuranceProduct? @relation(fields: [productId], references: [id])
+  productName     String            @map("product_name")
+  soldByAgentId   String?           @map("sold_by_agent_id") // Corredor/agente que vendio la poliza
+  soldByAgent     User?             @relation("AgentPolicies", fields: [soldByAgentId], references: [id])
+  ownerAgentId    String?           @map("owner_agent_id") // Corredor/agente responsable actual
+  ownerAgent      User?             @relation("PolicyOwnerAgent", fields: [ownerAgentId], references: [id])
+  createdById     String?           @map("created_by_id") // Usuario que creo la poliza
+  createdBy       User?             @relation("PolicyCreatedBy", fields: [createdById], references: [id])
+  startDate       DateTime          @map("start_date")
+  endDate         DateTime          @map("end_date")
+  status          String            @default("activa") // activa, pendiente, vencida, cancelada, en_renovacion
+  premium         Float
+  paymentMethod   String?           @map("payment_method") // mensual, trimestral, semestral, anual
+  coverages       String?           // JSON string
+  renewalDate     DateTime?         @map("renewal_date")
+  cancellationDate DateTime?        @map("cancellation_date")
+  cancellationReason String?        @map("cancellation_reason")
+  documents       Document[]
+  incidents       Incident[]
+  tasks           Task[]
+  notifications   Notification[]
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  deletedAt       DateTime?         @map("deleted_at")
+
+  @@index([clientId])
+  @@index([productId])
+  @@index([soldByAgentId])
+  @@index([ownerAgentId])
+  @@index([status])
+  @@index([endDate])
+  @@map("policies")
+}
+
+// ============================================================
+// APPOINTMENTS
+// ============================================================
+
+model Appointment {
+  id          String   @id @default(uuid())
+  clientId    String?  @map("client_id")
+  client      Client?  @relation(fields: [clientId], references: [id])
+  agentId     String   @map("agent_id")
+  agent       User     @relation(fields: [agentId], references: [id])
+  title       String
+  description String?
+  type        String   // llamada, videollamada, visita_presencial, renovacion, seguimiento, firma_poliza
+  status      String   @default("programada") // programada, confirmada, completada, cancelada, reagendada
+  date        DateTime
+  endDate     DateTime? @map("end_date")
+  location    String?
+  notes       String?
+  reminder    Boolean  @default(true)
+  reminderSent Boolean @default(false) @map("reminder_sent")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  @@index([clientId])
+  @@index([agentId])
+  @@index([date])
+  @@index([status])
+  @@map("appointments")
+}
+
+// ============================================================
+// TASKS
+// ============================================================
+
+model Task {
+  id              String      @id @default(uuid())
+  title           String
+  description     String?
+  clientId        String?     @map("client_id")
+  client          Client?     @relation(fields: [clientId], references: [id])
+  opportunityId   String?     @map("opportunity_id")
+  opportunity     Opportunity? @relation(fields: [opportunityId], references: [id])
+  policyId        String?     @map("policy_id")
+  policy          Policy?     @relation(fields: [policyId], references: [id])
+  assigneeId      String      @map("assignee_id")
+  assignee        User        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  dueDate         DateTime    @map("due_date")
+  priority        String      @default("media") // baja, media, alta, urgente
+  status          String      @default("pendiente") // pendiente, en_progreso, completada, cancelada
+  completedAt     DateTime?   @map("completed_at")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  deletedAt       DateTime?   @map("deleted_at")
+
+  @@index([clientId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("tasks")
+}
+
+// ============================================================
+// CAMPAIGNS
+// ============================================================
+
+model Campaign {
+  id              String            @id @default(uuid())
+  name            String
+  objective       String?
+  type            String            // email, llamada, sms, whatsapp, mixta
+  segment         String?           // todos, clientes_activos, prospectos, polizas_por_vencer, cumpleanos
+  productId       String?           @map("product_id")
+  startDate       DateTime          @map("start_date")
+  endDate         DateTime?         @map("end_date")
+  status          String            @default("borrador") // borrador, activa, pausada, completada, cancelada
+  responsibleId   String?           @map("responsible_id")
+  responsible     User?             @relation("CampaignResponsible", fields: [responsibleId], references: [id])
+  metrics         String?           // JSON string with metrics
+  members         CampaignMember[]
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  deletedAt       DateTime?         @map("deleted_at")
+
+  @@index([status])
+  @@index([responsibleId])
+  @@map("campaigns")
+}
+
+model CampaignMember {
+  id          String   @id @default(uuid())
+  campaignId  String   @map("campaign_id")
+  campaign    Campaign @relation(fields: [campaignId], references: [id])
+  clientId    String   @map("client_id")
+  client      Client   @relation(fields: [clientId], references: [id])
+  status      String   @default("pendiente") // pendiente, contactado, respondido, no_interesado, convertido
+  responseDate DateTime? @map("response_date")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([campaignId])
+  @@index([clientId])
+  @@map("campaign_members")
+}
+
+// ============================================================
+// INTERACTIONS
+// ============================================================
+
+model Interaction {
+  id          String   @id @default(uuid())
+  clientId    String   @map("client_id")
+  client      Client   @relation(fields: [clientId], references: [id])
+  leadId      String?  @map("lead_id")
+  lead        Lead?    @relation(fields: [leadId], references: [id])
+  type        String   // llamada, email, sms, whatsapp, visita, reunion, nota
+  direction   String?  // entrante, saliente
+  subject     String?
+  notes       String
+  agentId     String?  @map("agent_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([clientId])
+  @@index([leadId])
+  @@map("interactions")
+}
+
+// ============================================================
+// DOCUMENTS
+// ============================================================
+
+model Document {
+  id              String      @id @default(uuid())
+  name            String
+  type            String      // poliza, contrato, factura, identificacion, otro
+  mimeType        String?     @map("mime_type")
+  size            Int?
+  url             String
+  storagePath     String?     @map("storage_path") // Supabase Storage path
+  bucket          String?     // Supabase Storage bucket name
+  clientId        String?     @map("client_id")
+  client          Client?     @relation(fields: [clientId], references: [id])
+  policyId        String?     @map("policy_id")
+  policy          Policy?     @relation(fields: [policyId], references: [id])
+  opportunityId   String?     @map("opportunity_id")
+  opportunity     Opportunity? @relation(fields: [opportunityId], references: [id])
+  incidentId      String?     @map("incident_id")
+  incident        Incident?   @relation(fields: [incidentId], references: [id])
+  uploadedBy      String?     @map("uploaded_by")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  deletedAt       DateTime?   @map("deleted_at")
+
+  @@index([clientId])
+  @@index([policyId])
+  @@index([type])
+  @@map("documents")
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id          String   @id @default(uuid())
+  title       String
+  message     String
+  type        String   // alerta, recordatorio, sistema, renovacion
+  userId      String?  @map("user_id")
+  policyId    String?  @map("policy_id")
+  policy      Policy?  @relation(fields: [policyId], references: [id])
+  isRead      Boolean  @default(false) @map("is_read")
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+// ============================================================
+// INCIDENTS
+// ============================================================
+
+model Incident {
+  id           String     @id @default(uuid())
+  title        String
+  description  String
+  priority     String     @default("media") // baja, media, alta, critica
+  status       String     @default("abierta") // abierta, en_proceso, resuelta, cerrada
+  clientId     String?    @map("client_id")
+  client       Client?    @relation(fields: [clientId], references: [id])
+  policyId     String?    @map("policy_id")
+  policy       Policy?    @relation(fields: [policyId], references: [id])
+  assignedTo   String?    @map("assigned_to")
+  resolution   String?
+  documents    Document[]
+  internalNotes String?   @map("internal_notes")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  deletedAt    DateTime?  @map("deleted_at")
+
+  @@index([clientId])
+  @@index([policyId])
+  @@index([status])
+  @@map("incidents")
+}
+
+// ============================================================
+// LOYALTY SCORE
+// ============================================================
+
+model LoyaltyScore {
+  id                  String   @id @default(uuid())
+  clientId            String   @unique @map("client_id")
+  client              Client   @relation(fields: [clientId], references: [id])
+  score               Int      @default(0) // 0-100
+  activePolicies      Int      @default(0) @map("active_policies")
+  totalPremium        Float    @default(0) @map("total_premium")
+  yearsAsClient       Int      @default(0) @map("years_as_client")
+  lastContactDate     DateTime? @map("last_contact_date")
+  isAtRisk            Boolean  @default(false) @map("is_at_risk")
+  riskReason          String?  @map("risk_reason")
+  recommendedActions  String?  @map("recommended_actions") // JSON string of recommended actions
+  lastUpdated         DateTime @default(now()) @map("last_updated")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@index([isAtRisk])
+  @@map("loyalty_scores")
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?  @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id])
+  action      String   // create, update, delete, login, logout, search_dni, toggle_status, change_role, reassign
+  entity      String   // client, policy, lead, etc.
+  entityId    String?  @map("entity_id")
+  details     String?  // JSON string with change details
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([entity])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
