@@ -1,215 +1,137 @@
 'use client'
 
-import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAppStore } from '@/lib/store'
+import { api, type AdminUser } from '@/lib/api'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
+import { Skeleton } from '@/components/ui/skeleton'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useToast } from '@/hooks/use-toast'
-import { useIsMobile } from '@/hooks/use-mobile'
-import { api, type AdminUser, type AuditLogEntry, type Client, type Policy } from '@/lib/api'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
-  Plus, Users, Eye, Pencil, RefreshCw,
-  UserCheck, UserX, Search, Loader2, ChevronDown,
-  ChevronUp, Filter, Lock, Activity,
-  BarChart3, ShieldCheck, ClipboardList, KeyRound,
-  UserCircle, UserPlus, Briefcase, FileText,
-  ToggleLeft, ToggleRight, ArrowRightLeft,
+  Users, Shield, UserCheck, TrendingUp, DollarSign, Plus, Pencil, KeyRound,
+  Eye, Search, Building2, Loader2, X, Check, ArrowUpDown, Settings, ChevronLeft,
+  UserPlus, FileText, Calendar,
 } from 'lucide-react'
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { format, formatDistanceToNow } from 'date-fns'
-import { es } from 'date-fns/locale'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-
-// ============================================================
-// ROLE CONFIG
-// ============================================================
-const roleConfig: Record<string, { label: string; color: string; description: string; highlights: string[] }> = {
-  super_administrador: { label: 'Super Administrador', color: 'bg-red-100 text-red-700', description: 'Control total del sistema. Puede crear administradores y corredores. Cambiar propietario de clientes y pólizas. Ver auditoría. Eliminar datos sensibles.', highlights: ['Control total', 'Crear admins', 'Eliminar datos'] },
-  administrador: { label: 'Administrador', color: 'bg-emerald-100 text-emerald-700', description: 'Puede crear corredores/agentes y asignar clientes y pólizas. No puede crear administradores ni eliminar datos sensibles.', highlights: ['Crear corredores', 'Reasignar', 'Ver auditoría'] },
-  corredor: { label: 'Corredor/Agente', color: 'bg-teal-100 text-teal-700', description: 'Corredor/Agente de seguros. Gestiona clientes, citas, oportunidades y pólizas asignadas. Puede buscar por DNI/NIE.', highlights: ['Gestionar clientes', 'Vender pólizas', 'Buscar DNI/NIE'] },
-  atencion_cliente: { label: 'Atención al Cliente', color: 'bg-purple-100 text-purple-700', description: 'Busca clientes por DNI/NIE, ve datos básicos, crea incidencias y registra llamadas/notas. No puede modificar pólizas ni eliminar datos.', highlights: ['Buscar DNI/NIE', 'Crear incidencias', 'Registrar llamadas'] },
-  solo_lectura: { label: 'Solo Lectura', color: 'bg-gray-100 text-gray-700', description: 'Puede consultar información permitida. No puede crear, editar ni borrar.', highlights: ['Solo consulta', 'Sin edición'] },
-}
-
-const allRoleKeys = Object.keys(roleConfig)
 
 // ============================================================
 // TYPES
 // ============================================================
-interface AgentUser extends AdminUser {
+interface AdminWithStats extends AdminUser {
+  managerId?: string
+  documentType?: string
+  documentNumber?: string
+  office?: string
+  stats: {
+    corredoresCount: number
+    clientsCount: number
+    policiesCount: number
+    premium: number
+  }
+}
+
+interface AgentWithStats extends AdminUser {
   _count: {
     assignedClients: number
     soldPolicies: number
     ownedPolicies: number
     assignedLeads: number
   }
-  manager?: { id: string; name: string; lastName: string } | null
-  documentType?: string
-  documentNumber?: string
-  office?: string
+  manager?: { id: string; name: string; lastName: string; email: string }
 }
 
-interface AdminUserExtended extends AdminUser {
-  documentType?: string
-  documentNumber?: string
-  office?: string
-  createdById?: string
-  managerId?: string
-  manager?: { id: string; name: string; lastName: string } | null
-  createdBy?: { id: string; name: string; lastName: string } | null
-  _count?: {
-    managedUsers: number
-    assignedClients: number
-    soldPolicies: number
-    ownedPolicies: number
+interface SummaryData {
+  kpis: {
+    totalAdmins?: number
+    totalCorredores: number
+    totalClients: number
+    totalPolicies: number
+    totalPremium: number
+  }
+  admins?: Array<{
+    id: string
+    name: string
+    lastName: string
+    email: string
+    isActive: boolean
+    corredoresCount: number
+    clientsCount: number
+    policiesCount: number
+    premium: number
+  }>
+  agents?: Array<{
+    id: string
+    name: string
+    lastName: string
+    email: string
+    isActive: boolean
+    clientsCount: number
+    policiesCount: number
+    premium: number
+  }>
+}
+
+interface PortfolioData {
+  agent: {
+    id: string
+    name: string
+    lastName: string
+    email: string
+    phone?: string
+    office?: string
+    isActive: boolean
+    manager?: { id: string; name: string; lastName: string; email: string }
+  }
+  clients: Array<{ id: string; name: string; lastName: string; email: string; phone?: string; status: string }>
+  policies: Array<{ id: string; policyNumber: string; productName: string; status: string; premium: number; startDate: string; endDate: string; client: { id: string; name: string; lastName: string; email: string }; product?: { id: string; name: string; category: string } }>
+  appointments: Array<{ id: string; title: string; type: string; status: string; date: string; endDate?: string; client?: { id: string; name: string; lastName: string } }>
+  totalPremium: number
+  stats: {
+    totalClients: number
+    totalPolicies: number
+    activePolicies: number
+    totalAppointments: number
+    totalPremium: number
   }
 }
 
-interface RoleData {
-  id: string
-  name: string
-  description?: string
-  permissions: { id: string; name: string; module: string; action: string }[]
-  _count: { users: number }
+// ============================================================
+// ROLE CONFIG
+// ============================================================
+const roleConfig: Record<string, { label: string; color: string; description: string }> = {
+  super_administrador: { label: 'Super Admin', color: 'bg-red-100 text-red-700', description: 'Control total del sistema' },
+  administrador: { label: 'Administrador', color: 'bg-emerald-100 text-emerald-700', description: 'Gestión de corredores y asignaciones' },
+  corredor: { label: 'Corredor/Agente', color: 'bg-teal-100 text-teal-700', description: 'Gestión de clientes y pólizas' },
 }
-
-interface AdminSummary {
-  totalAdmins: number
-  totalCorredores: number
-  corredoresActivos: number
-  corredoresInactivos: number
-  totalClientes: number
-  totalPolizas: number
-  primaTotalEstimada: number
-}
-
-interface CreateAdminForm {
-  name: string
-  lastName: string
-  email: string
-  phone: string
-  documentType: string
-  documentNumber: string
-  password: string
-  confirmPassword: string
-  position: string
-  office: string
-  isActive: boolean
-}
-
-interface CreateAgentFormData {
-  name: string
-  lastName: string
-  email: string
-  phone: string
-  documentType: string
-  documentNumber: string
-  password: string
-  confirmPassword: string
-  position: string
-  office: string
-  managerId: string
-  isActive: boolean
-}
-
-interface CreateUserForm {
-  name: string
-  lastName: string
-  email: string
-  password: string
-  confirmPassword: string
-  phone: string
-  position: string
-  documentType: string
-  documentNumber: string
-  office: string
-  roleId: string
-}
-
-interface EditUserForm {
-  name: string
-  lastName: string
-  email: string
-  password: string
-  confirmPassword: string
-  phone: string
-  position: string
-  documentType: string
-  documentNumber: string
-  office: string
-}
-
-const emptyCreateAdminForm: CreateAdminForm = {
-  name: '', lastName: '', email: '', phone: '',
-  documentType: 'DNI', documentNumber: '',
-  password: '', confirmPassword: '',
-  position: '', office: '', isActive: true,
-}
-
-const emptyCreateAgentForm: CreateAgentFormData = {
-  name: '', lastName: '', email: '', phone: '',
-  documentType: 'DNI', documentNumber: '',
-  password: '', confirmPassword: '',
-  position: 'Corredor de Seguros', office: '',
-  managerId: '', isActive: true,
-}
-
-const emptyCreateUserForm: CreateUserForm = {
-  name: '', lastName: '', email: '', password: '', confirmPassword: '',
-  phone: '', position: '', documentType: 'DNI', documentNumber: '',
-  office: '', roleId: '',
-}
-
-// Audit log filter options
-const auditActionOptions = [
-  { value: '', label: 'Todas las acciones' },
-  { value: 'create', label: 'Crear' },
-  { value: 'update', label: 'Actualizar' },
-  { value: 'delete', label: 'Eliminar' },
-  { value: 'login', label: 'Login' },
-  { value: 'search_dni', label: 'Búsqueda DNI' },
-  { value: 'search_global', label: 'Búsqueda global' },
-  { value: 'reassign', label: 'Reasignar' },
-  { value: 'deactivate', label: 'Desactivar' },
-  { value: 'activate', label: 'Activar' },
-  { value: 'change_role', label: 'Cambiar rol' },
-  { value: 'create_duplicate', label: 'Crear duplicado' },
-]
-
-const auditEntityOptions = [
-  { value: '', label: 'Todas las entidades' },
-  { value: 'user', label: 'Usuario' },
-  { value: 'client', label: 'Cliente' },
-  { value: 'policy', label: 'Póliza' },
-  { value: 'lead', label: 'Lead' },
-  { value: 'agent', label: 'Agente' },
-  { value: 'system', label: 'Sistema' },
-]
-
-const documentTypeOptions = [
-  { value: 'DNI', label: 'DNI' },
-  { value: 'NIE', label: 'NIE' },
-  { value: 'PASSPORT', label: 'Pasaporte' },
-]
 
 // ============================================================
-// HELPER: Get role/status badges
+// HELPERS
 // ============================================================
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(value)
+
+const formatName = (name: string, lastName?: string) =>
+  `${name} ${lastName || ''}`.trim()
+
+const getStatusBadge = (isActive: boolean) => (
+  <Badge className={isActive ? 'bg-emerald-100 text-emerald-700 border-0 text-[10px] sm:text-xs' : 'bg-red-100 text-red-600 border-0 text-[10px] sm:text-xs'}>
+    {isActive ? 'Activo' : 'Inactivo'}
+  </Badge>
+)
+
 const getRoleBadge = (roleName: string) => {
   const config = roleConfig[roleName]
   if (config) {
@@ -218,345 +140,76 @@ const getRoleBadge = (roleName: string) => {
   return <Badge className="bg-gray-100 text-gray-700 border-0 text-[10px] sm:text-xs">{roleName}</Badge>
 }
 
-const getStatusBadge = (isActive: boolean) => (
-  <Badge className={isActive ? 'bg-emerald-100 text-emerald-700 border-0 text-[10px] sm:text-xs' : 'bg-gray-100 text-gray-500 border-0 text-[10px] sm:text-xs'}>
-    {isActive ? 'Activo' : 'Inactivo'}
-  </Badge>
-)
-
-// ============================================================
-// ROLE SELECTOR CARDS
-// ============================================================
-const RoleSelectorCards = ({
-  selectedRoleId,
-  onSelectRoleId,
-  availableRoleNames,
-  allRoleNames,
-  roles,
-}: {
-  selectedRoleId: string
-  onSelectRoleId: (roleId: string) => void
-  availableRoleNames: string[]
-  allRoleNames?: string[]
-  roles: RoleData[]
-}) => {
-  const displayRoles = allRoleNames || availableRoleNames
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {displayRoles.map((roleName) => {
-        const config = roleConfig[roleName]
-        if (!config) return null
-        const roleObj = roles.find((r) => r.name === roleName)
-        const roleId = roleObj?.id || ''
-        const isAvailable = availableRoleNames.includes(roleName)
-        const isSelected = isAvailable && selectedRoleId === roleId
-        const userCount = roleObj?._count?.users ?? 0
-        return (
-          <button
-            key={roleName}
-            type="button"
-            onClick={() => isAvailable && roleId ? onSelectRoleId(roleId) : undefined}
-            disabled={!isAvailable}
-            className={`text-left p-3 rounded-lg border-2 transition-all relative ${
-              !isAvailable
-                ? 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
-                : isSelected
-                  ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500'
-                  : 'border-gray-200 bg-white hover:border-gray-300'
-            }`}
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <Badge className={`${config.color} border-0 text-[10px]`}>{config.label}</Badge>
-              {isSelected && (
-                <div className="w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center ml-auto">
-                  <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-              )}
-              {!isAvailable && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="flex items-center gap-1 ml-auto text-gray-400">
-                      <Lock className="h-3.5 w-3.5" />
-                      <span className="text-[10px]">No disponible</span>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    <p>No tienes permiso para asignar este rol</p>
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 leading-relaxed mb-2">{config.description}</p>
-            <div className="flex flex-wrap gap-1 mb-1.5">
-              {config.highlights.map((h) => (
-                <span key={h} className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium ${!isAvailable ? 'bg-gray-100 text-gray-400' : 'bg-gray-100 text-gray-600'}`}>
-                  {h}
-                </span>
-              ))}
-            </div>
-            <div className="flex items-center gap-1 text-[10px] text-gray-400">
-              <Users className="h-3 w-3" />
-              <span>{userCount} {userCount === 1 ? 'usuario' : 'usuarios'}</span>
-            </div>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-// ============================================================
-// VIEW USER CONTENT
-// ============================================================
-const ViewUserContent = ({ user: u }: { user: AdminUser }) => {
-  const permissionsByModule = (u.permissions || []).reduce<Record<string, typeof u.permissions>>((acc, p) => {
-    if (!acc[p.module]) acc[p.module] = []
-    acc[p.module].push(p)
-    return acc
-  }, {})
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <p className="text-xs text-gray-500">Nombre</p>
-          <p className="text-sm font-medium">{u.name} {u.lastName || ''}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">Email</p>
-          <p className="text-sm font-medium">{u.email}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">Teléfono</p>
-          <p className="text-sm font-medium">{u.phone || '—'}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">Cargo</p>
-          <p className="text-sm font-medium">{u.position || '—'}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">Rol</p>
-          <div className="mt-0.5">
-            {getRoleBadge(u.role?.name || '')}
-            {u.role?.description && <p className="text-xs text-gray-400 mt-1">{u.role.description}</p>}
-          </div>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">Estado</p>
-          <div className="mt-0.5">{getStatusBadge(u.isActive)}</div>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">Fecha de creación</p>
-          <p className="text-sm font-medium">{format(new Date(u.createdAt), 'dd/MM/yyyy')}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">Último acceso</p>
-          <p className="text-sm font-medium">{u.lastLogin ? format(new Date(u.lastLogin), 'dd/MM/yyyy HH:mm') : 'Nunca'}</p>
-        </div>
-      </div>
-      {Object.keys(permissionsByModule).length > 0 && (
-        <>
-          <Separator />
-          <div>
-            <p className="text-sm font-medium text-gray-700 mb-2">Permisos</p>
-            <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-              {Object.entries(permissionsByModule).map(([module, perms]) => (
-                <div key={module}>
-                  <p className="text-xs font-semibold text-gray-600 capitalize mb-1">{module}</p>
-                  <div className="flex flex-wrap gap-1">
-                    {perms.map((p) => (
-                      <Badge key={p.id} variant="outline" className="text-[10px]">{p.action}</Badge>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-// ============================================================
-// DOCUMENT TYPE SELECTOR
-// ============================================================
-const DocumentTypeSelector = ({
-  value,
-  onChange,
-  documentNumber,
-  onDocumentNumberChange,
-  isMobile,
-}: {
-  value: string
-  onChange: (v: string) => void
-  documentNumber: string
-  onDocumentNumberChange: (v: string) => void
-  isMobile: boolean
-}) => (
-  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-    <div className="space-y-1.5">
-      <Label className="text-sm">Tipo documento</Label>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className={isMobile ? 'h-11' : ''}>
-          <SelectValue placeholder="Tipo" />
-        </SelectTrigger>
-        <SelectContent>
-          {documentTypeOptions.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-    <div className="space-y-1.5 sm:col-span-2">
-      <Label className="text-sm">Nº documento</Label>
-      <Input
-        className={isMobile ? 'h-11' : ''}
-        value={documentNumber}
-        onChange={(e) => onDocumentNumberChange(e.target.value)}
-        placeholder="12345678A"
-      />
-    </div>
-  </div>
-)
-
-// ============================================================
-// LOADING SKELETONS
-// ============================================================
-const StatCardSkeleton = () => (
-  <Card>
-    <CardContent className="p-4">
-      <Skeleton className="h-4 w-20 mb-2" />
-      <Skeleton className="h-8 w-16" />
-    </CardContent>
-  </Card>
-)
-
-const TableRowSkeleton = () => (
-  <TableRow>
-    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-  </TableRow>
-)
-
-// ============================================================
-// EMPTY STATES
-// ============================================================
-const EmptyState = ({ icon: Icon, message }: { icon: React.ElementType; message: string }) => (
-  <div className="flex flex-col items-center justify-center py-12 text-center">
-    <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-      <Icon className="h-8 w-8 text-gray-400" />
-    </div>
-    <p className="text-sm text-gray-500 max-w-xs">{message}</p>
-  </div>
-)
-
 // ============================================================
 // MAIN COMPONENT
 // ============================================================
 export default function AdminPage() {
-  const { user: currentUser, token } = useAppStore()
-  const { toast } = useToast()
+  const { user: currentUser } = useAppStore()
   const isMobile = useIsMobile()
 
-  // Permission helpers
+  // ---- Role helpers ----
   const isSuperAdmin = currentUser?.role === 'super_administrador'
   const isAdmin = currentUser?.role === 'administrador' || isSuperAdmin
-  const assignableRoles = allRoleKeys.filter((key) => {
-    if (isSuperAdmin) return true
-    if (isAdmin) return key !== 'super_administrador' && key !== 'administrador'
-    return false
-  })
 
-  // ---- DATA STATE ----
-  const [summary, setSummary] = useState<AdminSummary | null>(null)
+  // ---- Tab ----
+  const [activeTab, setActiveTab] = useState<string>(isSuperAdmin ? 'overview' : 'overview')
+
+  // ---- Summary ----
+  const [summary, setSummary] = useState<SummaryData | null>(null)
   const [loadingSummary, setLoadingSummary] = useState(true)
 
-  const [admins, setAdmins] = useState<AdminUserExtended[]>([])
+  // ---- Admins ----
+  const [admins, setAdmins] = useState<AdminWithStats[]>([])
+  const [totalAdmins, setTotalAdmins] = useState(0)
+  const [adminsPage, setAdminsPage] = useState(1)
+  const [adminsSearch, setAdminsSearch] = useState('')
+  const [adminsStatusFilter, setAdminsStatusFilter] = useState<string>('all')
   const [loadingAdmins, setLoadingAdmins] = useState(true)
 
-  const [agents, setAgents] = useState<AgentUser[]>([])
+  // ---- Agents ----
+  const [agents, setAgents] = useState<AgentWithStats[]>([])
   const [totalAgents, setTotalAgents] = useState(0)
   const [agentsPage, setAgentsPage] = useState(1)
   const [agentsSearch, setAgentsSearch] = useState('')
-  const [agentsAdminFilter, setAgentsAdminFilter] = useState('')
+  const [agentsStatusFilter, setAgentsStatusFilter] = useState<string>('all')
+  const [agentsManagerFilter, setAgentsManagerFilter] = useState<string>('all')
   const [loadingAgents, setLoadingAgents] = useState(true)
 
-  const [users, setUsers] = useState<AdminUser[]>([])
-  const [totalUsers, setTotalUsers] = useState(0)
-  const [usersPage, setUsersPage] = useState(1)
-  const [usersSearch, setUsersSearch] = useState('')
-  const [usersRoleFilter, setUsersRoleFilter] = useState('')
-  const [loadingUsers, setLoadingUsers] = useState(true)
-
-  const [roles, setRoles] = useState<RoleData[]>([])
-
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
-  const [totalAuditLogs, setTotalAuditLogs] = useState(0)
-  const [auditPage, setAuditPage] = useState(1)
-  const [auditActionFilter, setAuditActionFilter] = useState('')
-  const [auditEntityFilter, setAuditEntityFilter] = useState('')
-  const [loadingAuditLogs, setLoadingAuditLogs] = useState(true)
-  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null)
-
-  // ---- UI STATE ----
-  const [_fetchVersion, setFetchVersion] = useState(0)
-  const triggerRefresh = useCallback(() => setFetchVersion((v) => v + 1), [])
-  const [activeTab, setActiveTab] = useState('resumen')
-  const [saving, setSaving] = useState(false)
-
-  // Admin dialogs
+  // ---- Dialog states ----
   const [createAdminOpen, setCreateAdminOpen] = useState(false)
   const [editAdminOpen, setEditAdminOpen] = useState(false)
-  const [editingAdmin, setEditingAdmin] = useState<AdminUserExtended | null>(null)
-  const [editAdminForm, setEditAdminForm] = useState<CreateAdminForm>(emptyCreateAdminForm)
-  const [showAdminPassword, setShowAdminPassword] = useState(false)
-  const [showEditAdminPassword, setShowEditAdminPassword] = useState(false)
-  const [createAdminForm, setCreateAdminForm] = useState<CreateAdminForm>(emptyCreateAdminForm)
-
-  // Agent dialogs
   const [createAgentOpen, setCreateAgentOpen] = useState(false)
   const [editAgentOpen, setEditAgentOpen] = useState(false)
-  const [editingAgent, setEditingAgent] = useState<AgentUser | null>(null)
-  const [editAgentForm, setEditAgentForm] = useState<CreateAgentFormData>(emptyCreateAgentForm)
-  const [showAgentPassword, setShowAgentPassword] = useState(false)
-  const [showEditAgentPassword, setShowEditAgentPassword] = useState(false)
-  const [createAgentForm, setCreateAgentForm] = useState<CreateAgentFormData>(emptyCreateAgentForm)
-
-  // Agent portfolio/ficha
-  const [fichaOpen, setFichaOpen] = useState(false)
-  const [fichaAgent, setFichaAgent] = useState<AgentUser | null>(null)
-  const [fichaClients, setFichaClients] = useState<Client[]>([])
-  const [fichaPolicies, setFichaPolicies] = useState<Policy[]>([])
-  const [fichaLoading, setFichaLoading] = useState(false)
-
-  // User dialogs
-  const [createUserOpen, setCreateUserOpen] = useState(false)
-  const [editUserOpen, setEditUserOpen] = useState(false)
-  const [viewUserOpen, setViewUserOpen] = useState(false)
-  const [changeRoleOpen, setChangeRoleOpen] = useState(false)
-  const [createForm, setCreateForm] = useState<CreateUserForm>(emptyCreateUserForm)
-  const [editForm, setEditForm] = useState<EditUserForm>({ name: '', lastName: '', email: '', password: '', confirmPassword: '', phone: '', position: '', documentType: 'DNI', documentNumber: '', office: '' })
-  const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
-  const [viewingUser, setViewingUser] = useState<AdminUser | null>(null)
-  const [changingRoleUser, setChangingRoleUser] = useState<AdminUser | null>(null)
-  const [selectedNewRole, setSelectedNewRole] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [showEditPassword, setShowEditPassword] = useState(false)
-
-  // Reset password dialog
+  const [portfolioOpen, setPortfolioOpen] = useState(false)
   const [resetPasswordOpen, setResetPasswordOpen] = useState(false)
-  const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null)
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmNewPassword, setConfirmNewPassword] = useState('')
-  const [showNewPassword, setShowNewPassword] = useState(false)
 
-  // Confirm dialog
+  // ---- Form data ----
+  const [adminForm, setAdminForm] = useState({
+    name: '', lastName: '', email: '', password: '', confirmPassword: '',
+    phone: '', documentType: 'DNI', documentNumber: '', office: '', isActive: true,
+  })
+  const [editAdminForm, setEditAdminForm] = useState({
+    id: '', name: '', lastName: '', email: '', password: '', confirmPassword: '',
+    phone: '', documentType: 'DNI', documentNumber: '', office: '', isActive: true,
+  })
+  const [agentForm, setAgentForm] = useState({
+    name: '', lastName: '', email: '', password: '', confirmPassword: '',
+    phone: '', managerId: '', isActive: true,
+  })
+  const [editAgentForm, setEditAgentForm] = useState({
+    id: '', name: '', lastName: '', email: '', password: '', confirmPassword: '',
+    phone: '', managerId: '', isActive: true,
+  })
+  const [resetPasswordForm, setResetPasswordForm] = useState({ userId: '', userName: '', newPassword: '', confirmPassword: '' })
+
+  // ---- Portfolio ----
+  const [portfolioData, setPortfolioData] = useState<PortfolioData | null>(null)
+  const [portfolioLoading, setPortfolioLoading] = useState(false)
+  const [portfolioAgentId, setPortfolioAgentId] = useState<string | null>(null)
+
+  // ---- General ----
+  const [saving, setSaving] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean
     title: string
@@ -568,256 +221,109 @@ export default function AdminPage() {
   // ============================================================
   // DATA FETCHING
   // ============================================================
+  const fetchSummary = useCallback(async () => {
+    try {
+      setLoadingSummary(true)
+      const res = await api.getAdminSummary()
+      setSummary(res.data)
+    } catch (err: any) {
+      toast.error('Error al cargar resumen', { description: err.message })
+    } finally {
+      setLoadingSummary(false)
+    }
+  }, [])
 
-  // Summary
-  useEffect(() => {
-    if (!token) return
-    let cancelled = false
-    async function load() {
-      try {
-        setLoadingSummary(true)
-        const res = await api.getAdminSummary()
-        if (!cancelled) setSummary(res.data)
-      } catch {
-        // Non-critical
-      } finally {
-        if (!cancelled) setLoadingSummary(false)
+  const fetchAdmins = useCallback(async () => {
+    if (!isSuperAdmin) return
+    try {
+      setLoadingAdmins(true)
+      const params: Record<string, string> = { page: String(adminsPage), limit: '20' }
+      if (adminsSearch) params.search = adminsSearch
+      if (adminsStatusFilter && adminsStatusFilter !== 'all') params.isActive = adminsStatusFilter
+      const res = await api.getAdmins(params)
+      setAdmins(res.data)
+      setTotalAdmins(res.total)
+    } catch (err: any) {
+      toast.error('Error al cargar administradores', { description: err.message })
+    } finally {
+      setLoadingAdmins(false)
+    }
+  }, [adminsPage, adminsSearch, adminsStatusFilter, isSuperAdmin])
+
+  const fetchAgents = useCallback(async () => {
+    try {
+      setLoadingAgents(true)
+      const params: Record<string, string> = { page: String(agentsPage), limit: '20' }
+      if (agentsSearch) params.search = agentsSearch
+      if (agentsStatusFilter && agentsStatusFilter !== 'all') params.isActive = agentsStatusFilter
+      if (agentsManagerFilter && agentsManagerFilter !== 'all') params.managerId = agentsManagerFilter
+      // For administrador role, auto-filter to own agents
+      if (isAdmin && !isSuperAdmin) {
+        params.managerId = currentUser?.id || ''
       }
+      const res = await api.getAgents(params)
+      setAgents(res.data as AgentWithStats[])
+      setTotalAgents(res.total)
+    } catch (err: any) {
+      toast.error('Error al cargar corredores', { description: err.message })
+    } finally {
+      setLoadingAgents(false)
     }
-    load()
-    return () => { cancelled = true }
-  }, [token, _fetchVersion])
+  }, [agentsPage, agentsSearch, agentsStatusFilter, agentsManagerFilter, isAdmin, isSuperAdmin, currentUser?.id])
 
-  // Helper to get role ID from loaded roles
-  const getRoleId = useCallback((name: string) => roles.find((r) => r.name === name)?.id, [roles])
-
-  // Admins
   useEffect(() => {
-    if (!token || !isSuperAdmin) return
-    let cancelled = false
-    async function load() {
-      try {
-        setLoadingAdmins(true)
-        const res = await api.getUsers({ role: 'administrador', limit: '100' })
-        if (!cancelled) setAdmins(res.data as unknown as AdminUserExtended[])
-      } catch (err: any) {
-        if (!cancelled) toast({ title: 'Error al cargar administradores', description: err.message, variant: 'destructive' })
-      } finally {
-        if (!cancelled) setLoadingAdmins(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [token, isSuperAdmin, toast, _fetchVersion])
+    fetchSummary()
+  }, [fetchSummary])
 
-  // Agents
   useEffect(() => {
-    if (!token) return
-    let cancelled = false
-    async function load() {
-      try {
-        setLoadingAgents(true)
-        const params: Record<string, string> = { page: String(agentsPage), limit: '20' }
-        if (agentsSearch) params.search = agentsSearch
-        if (agentsAdminFilter) params.managerId = agentsAdminFilter
-        const res = await api.getAgents(params)
-        if (!cancelled) {
-          setAgents(res.data as AgentUser[])
-          setTotalAgents(res.total)
-        }
-      } catch (err: any) {
-        if (!cancelled) toast({ title: 'Error al cargar corredores', description: err.message, variant: 'destructive' })
-      } finally {
-        if (!cancelled) setLoadingAgents(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [token, agentsPage, agentsSearch, agentsAdminFilter, toast, _fetchVersion])
+    if (activeTab === 'admins') fetchAdmins()
+  }, [activeTab, fetchAdmins])
 
-  // Users
   useEffect(() => {
-    if (!token || !isSuperAdmin) return
-    let cancelled = false
-    async function load() {
-      try {
-        setLoadingUsers(true)
-        const params: Record<string, string> = { page: String(usersPage), limit: '20' }
-        if (usersSearch) params.search = usersSearch
-        if (usersRoleFilter) params.role = usersRoleFilter
-        const res = await api.getUsers(params)
-        if (!cancelled) {
-          setUsers(res.data)
-          setTotalUsers(res.total)
-        }
-      } catch (err: any) {
-        if (!cancelled) toast({ title: 'Error al cargar usuarios', description: err.message, variant: 'destructive' })
-      } finally {
-        if (!cancelled) setLoadingUsers(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [token, usersPage, usersSearch, usersRoleFilter, isSuperAdmin, toast, _fetchVersion])
-
-  // Roles
-  useEffect(() => {
-    if (!token) return
-    let cancelled = false
-    async function load() {
-      try {
-        const res = await api.getRoles()
-        if (!cancelled) setRoles(res.data)
-      } catch { /* non-critical */ }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [token])
-
-  // Audit logs
-  useEffect(() => {
-    if (!token) return
-    let cancelled = false
-    async function load() {
-      try {
-        setLoadingAuditLogs(true)
-        const params: Record<string, string> = { page: String(auditPage), limit: '20' }
-        if (auditActionFilter) params.action = auditActionFilter
-        if (auditEntityFilter) params.entity = auditEntityFilter
-        const res = await api.getAuditLogs(params)
-        if (!cancelled) {
-          setAuditLogs(res.data)
-          setTotalAuditLogs(res.total)
-        }
-      } catch (err: any) {
-        if (!cancelled) toast({ title: 'Error al cargar auditoría', description: err.message, variant: 'destructive' })
-      } finally {
-        if (!cancelled) setLoadingAuditLogs(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [token, auditPage, auditActionFilter, auditEntityFilter, toast, _fetchVersion])
-
-  // Refresh helpers
-  const refreshAll = useCallback(() => {
-    triggerRefresh()
-  }, [triggerRefresh])
+    if (activeTab === 'agents') fetchAgents()
+  }, [activeTab, fetchAgents])
 
   // ============================================================
-  // TAB 1: RESUMEN
-  // ============================================================
-  const renderResumen = () => {
-    if (loadingSummary) {
-      return (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {Array.from({ length: 7 }).map((_, i) => <StatCardSkeleton key={i} />)}
-        </div>
-      )
-    }
-
-    const stats = [
-      { label: 'Total administradores', value: summary?.totalAdmins ?? 0, icon: ShieldCheck, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-      { label: 'Total corredores', value: summary?.totalCorredores ?? 0, icon: Briefcase, color: 'text-teal-600', bg: 'bg-teal-50' },
-      { label: 'Corredores activos', value: summary?.corredoresActivos ?? 0, icon: UserCheck, color: 'text-green-600', bg: 'bg-green-50' },
-      { label: 'Corredores inactivos', value: summary?.corredoresInactivos ?? 0, icon: UserX, color: 'text-gray-500', bg: 'bg-gray-50' },
-      { label: 'Total clientes', value: summary?.totalClientes ?? 0, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-      { label: 'Total pólizas', value: summary?.totalPolizas ?? 0, icon: FileText, color: 'text-purple-600', bg: 'bg-purple-50' },
-      { label: 'Prima total estimada', value: `${(summary?.primaTotalEstimada ?? 0).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}`, icon: BarChart3, color: 'text-amber-600', bg: 'bg-amber-50' },
-    ]
-
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Resumen del sistema</h2>
-          <Button variant="outline" size="sm" onClick={refreshAll}>
-            <RefreshCw className="h-4 w-4 mr-1" />
-            Actualizar
-          </Button>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map((stat) => (
-            <Card key={stat.label}>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg ${stat.bg} flex items-center justify-center`}>
-                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 leading-tight">{stat.label}</p>
-                    <p className="text-lg font-bold text-gray-900">{stat.value}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  // ============================================================
-  // TAB 2: ADMINISTRADORES
+  // ADMIN CRUD
   // ============================================================
   const handleCreateAdmin = async () => {
-    if (!createAdminForm.name.trim() || !createAdminForm.email.trim()) {
-      toast({ title: 'Campos requeridos', description: 'Nombre y email son obligatorios', variant: 'destructive' })
-      return
-    }
-    if (!createAdminForm.password || createAdminForm.password.length < 8) {
-      toast({ title: 'Contraseña inválida', description: 'La contraseña debe tener al menos 8 caracteres', variant: 'destructive' })
-      return
-    }
-    if (createAdminForm.password !== createAdminForm.confirmPassword) {
-      toast({ title: 'Error', description: 'Las contraseñas no coinciden', variant: 'destructive' })
-      return
-    }
-    const adminRoleId = getRoleId('administrador')
-    if (!adminRoleId) {
-      toast({ title: 'Error', description: 'Rol de administrador no encontrado', variant: 'destructive' })
-      return
-    }
+    if (!adminForm.name.trim()) { toast.error('Campo requerido', { description: 'El nombre es obligatorio' }); return }
+    if (!adminForm.email.trim()) { toast.error('Campo requerido', { description: 'El email es obligatorio' }); return }
+    if (!adminForm.password || adminForm.password.length < 8) { toast.error('Contraseña inválida', { description: 'La contraseña debe tener al menos 8 caracteres' }); return }
+    if (adminForm.password !== adminForm.confirmPassword) { toast.error('Error', { description: 'Las contraseñas no coinciden' }); return }
+
     try {
       setSaving(true)
-      await api.createUser({
-        name: createAdminForm.name,
-        lastName: createAdminForm.lastName || undefined,
-        email: createAdminForm.email,
-        password: createAdminForm.password,
-        phone: createAdminForm.phone || undefined,
-        position: createAdminForm.position || undefined,
-        roleId: adminRoleId,
-        documentType: createAdminForm.documentType,
-        documentNumber: createAdminForm.documentNumber || undefined,
-        office: createAdminForm.office || undefined,
-        isActive: createAdminForm.isActive,
+      await api.createAdmin({
+        name: adminForm.name,
+        lastName: adminForm.lastName || undefined,
+        email: adminForm.email,
+        password: adminForm.password,
+        phone: adminForm.phone || undefined,
+        documentType: adminForm.documentType,
+        documentNumber: adminForm.documentNumber || undefined,
+        office: adminForm.office || undefined,
+        isActive: adminForm.isActive,
       })
-      toast({ title: 'Administrador creado', description: 'El administrador se ha creado correctamente' })
+      toast.success('Administrador creado correctamente')
       setCreateAdminOpen(false)
-      setCreateAdminForm(emptyCreateAdminForm)
-      setShowAdminPassword(false)
-      triggerRefresh()
+      setAdminForm({ name: '', lastName: '', email: '', password: '', confirmPassword: '', phone: '', documentType: 'DNI', documentNumber: '', office: '', isActive: true })
+      setShowPassword(false)
+      fetchAdmins()
+      fetchSummary()
     } catch (err: any) {
-      toast({ title: 'Error al crear administrador', description: err.message, variant: 'destructive' })
+      toast.error('Error al crear administrador', { description: err.message })
     } finally {
       setSaving(false)
     }
   }
 
-  const handleEditAdmin = async () => {
-    if (!editingAdmin) return
-    if (!editAdminForm.name.trim() || !editAdminForm.email.trim()) {
-      toast({ title: 'Campos requeridos', description: 'Nombre y email son obligatorios', variant: 'destructive' })
-      return
-    }
-    if (editAdminForm.password && editAdminForm.password.length < 8) {
-      toast({ title: 'Contraseña inválida', description: 'La contraseña debe tener al menos 8 caracteres', variant: 'destructive' })
-      return
-    }
-    if (editAdminForm.password && editAdminForm.password !== editAdminForm.confirmPassword) {
-      toast({ title: 'Error', description: 'Las contraseñas no coinciden', variant: 'destructive' })
-      return
-    }
+  const handleUpdateAdmin = async () => {
+    if (!editAdminForm.name.trim()) { toast.error('Campo requerido', { description: 'El nombre es obligatorio' }); return }
+    if (!editAdminForm.email.trim()) { toast.error('Campo requerido', { description: 'El email es obligatorio' }); return }
+    if (editAdminForm.password && editAdminForm.password.length < 8) { toast.error('Contraseña inválida', { description: 'La contraseña debe tener al menos 8 caracteres' }); return }
+    if (editAdminForm.password && editAdminForm.password !== editAdminForm.confirmPassword) { toast.error('Error', { description: 'Las contraseñas no coinciden' }); return }
+
     try {
       setSaving(true)
       const data: Record<string, unknown> = {
@@ -825,228 +331,104 @@ export default function AdminPage() {
         lastName: editAdminForm.lastName || null,
         email: editAdminForm.email,
         phone: editAdminForm.phone || null,
-        position: editAdminForm.position || null,
         documentType: editAdminForm.documentType,
         documentNumber: editAdminForm.documentNumber || null,
         office: editAdminForm.office || null,
+        isActive: editAdminForm.isActive,
       }
       if (editAdminForm.password) data.password = editAdminForm.password
-      await api.updateUser(editingAdmin.id, data)
-      toast({ title: 'Administrador actualizado', description: 'Los datos se han actualizado correctamente' })
+      await api.updateAdmin(editAdminForm.id, data)
+      toast.success('Administrador actualizado')
       setEditAdminOpen(false)
-      setEditingAdmin(null)
-      setShowEditAdminPassword(false)
-      triggerRefresh()
+      setShowPassword(false)
+      fetchAdmins()
+      fetchSummary()
     } catch (err: any) {
-      toast({ title: 'Error al actualizar', description: err.message, variant: 'destructive' })
+      toast.error('Error al actualizar', { description: err.message })
     } finally {
       setSaving(false)
     }
   }
 
-  const openEditAdmin = (admin: AdminUserExtended) => {
-    setEditingAdmin(admin)
+  const handleOpenEditAdmin = (admin: AdminWithStats) => {
     setEditAdminForm({
+      id: admin.id,
       name: admin.name,
       lastName: admin.lastName || '',
       email: admin.email,
-      phone: admin.phone || '',
-      documentType: (admin as any).documentType || 'DNI',
-      documentNumber: (admin as any).documentNumber || '',
       password: '',
       confirmPassword: '',
-      position: admin.position || '',
-      office: (admin as any).office || '',
+      phone: admin.phone || '',
+      documentType: admin.documentType || 'DNI',
+      documentNumber: admin.documentNumber || '',
+      office: admin.office || '',
       isActive: admin.isActive,
     })
     setEditAdminOpen(true)
   }
 
-  const renderAdministradores = () => {
-    if (!isSuperAdmin) return null
-
-    const adminContent = () => {
-      if (loadingAdmins) {
-        return (
-          <div className="space-y-2">
-            {Array.from({ length: 3 }).map((_, i) => <TableRowSkeleton key={i} />)}
-          </div>
-        )
-      }
-      if (admins.length === 0) {
-        return <EmptyState icon={ShieldCheck} message="Todavía no hay administradores registrados." />
-      }
-
-      if (isMobile) {
-        return (
-          <div className="space-y-3">
-            {admins.map((admin) => (
-              <Card key={admin.id}>
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-medium text-sm">{admin.name} {admin.lastName || ''}</p>
-                      <p className="text-xs text-gray-500">{admin.email}</p>
-                    </div>
-                    {getStatusBadge(admin.isActive)}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div><span className="text-gray-500">Teléfono:</span> {admin.phone || '—'}</div>
-                    <div><span className="text-gray-500">DNI/NIE:</span> {(admin as any).documentNumber || '—'}</div>
-                    <div><span className="text-gray-500">Cargo:</span> {admin.position || '—'}</div>
-                    <div><span className="text-gray-500">Oficina:</span> {(admin as any).office || '—'}</div>
-                    <div><span className="text-gray-500">Último acceso:</span> {admin.lastLogin ? format(new Date(admin.lastLogin), 'dd/MM/yy') : 'Nunca'}</div>
-                  </div>
-                  <div className="flex gap-2 pt-1">
-                    <Button size="sm" variant="outline" onClick={() => openEditAdmin(admin)}><Pencil className="h-3 w-3 mr-1" />Editar</Button>
-                    <Button size="sm" variant="outline" onClick={() => handleOpenResetPassword(admin as any)}><KeyRound className="h-3 w-3 mr-1" />Reset</Button>
-                    <Button size="sm" variant={admin.isActive ? 'outline' : 'default'} onClick={() => handleToggleAdminStatus(admin as any)}>
-                      {admin.isActive ? <UserX className="h-3 w-3 mr-1" /> : <UserCheck className="h-3 w-3 mr-1" />}
-                      {admin.isActive ? 'Desactivar' : 'Activar'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )
-      }
-
-      return (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Teléfono</TableHead>
-                <TableHead>DNI/NIE</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Último acceso</TableHead>
-                <TableHead>Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {admins.map((admin) => (
-                <TableRow key={admin.id}>
-                  <TableCell className="font-medium">{admin.name} {admin.lastName || ''}</TableCell>
-                  <TableCell className="text-sm">{admin.email}</TableCell>
-                  <TableCell className="text-sm">{admin.phone || '—'}</TableCell>
-                  <TableCell className="text-sm">{(admin as any).documentNumber || '—'}</TableCell>
-                  <TableCell>{getStatusBadge(admin.isActive)}</TableCell>
-                  <TableCell className="text-sm">{admin.lastLogin ? format(new Date(admin.lastLogin), 'dd/MM/yy HH:mm') : 'Nunca'}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => openEditAdmin(admin)} title="Editar"><Pencil className="h-4 w-4" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleOpenResetPassword(admin as any)} title="Reset contraseña"><KeyRound className="h-4 w-4" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleToggleAdminStatus(admin as any)} title={admin.isActive ? 'Desactivar' : 'Activar'}>
-                        {admin.isActive ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )
-    }
-
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Administradores</h2>
-          <Button onClick={() => { setCreateAdminForm(emptyCreateAdminForm); setCreateAdminOpen(true) }}>
-            <Plus className="h-4 w-4 mr-1" /> Nuevo administrador
-          </Button>
-        </div>
-        {adminContent()}
-      </div>
-    )
-  }
-
-  const handleToggleAdminStatus = (admin: AdminUser) => {
-    if (admin.id === currentUser?.id) {
-      toast({ title: 'Acción no permitida', description: 'No puedes cambiar tu propio estado', variant: 'destructive' })
-      return
-    }
-    const fullName = `${admin.name} ${admin.lastName || ''}`.trim()
+  const handleToggleAdminStatus = (admin: AdminWithStats) => {
+    const fullName = formatName(admin.name, admin.lastName)
     setConfirmDialog({
       open: true,
       title: admin.isActive ? '¿Desactivar administrador?' : '¿Activar administrador?',
-      description: admin.isActive ? `¿Desactivar a ${fullName}? No podrá iniciar sesión.` : `¿Activar a ${fullName}?`,
+      description: admin.isActive
+        ? `¿Estás seguro de desactivar a ${fullName}? No podrá iniciar sesión.`
+        : `¿Estás seguro de activar a ${fullName}?`,
       variant: admin.isActive ? 'destructive' : 'default',
       onConfirm: async () => {
         try {
-          await api.toggleUserStatus(admin.id)
-          toast({ title: `Administrador ${admin.isActive ? 'desactivado' : 'activado'}` })
-          triggerRefresh()
+          await api.updateAdmin(admin.id, { isActive: !admin.isActive })
+          toast.success(fullName + (admin.isActive ? ' desactivado' : ' activado'))
+          fetchAdmins()
+          fetchSummary()
         } catch (err: any) {
-          toast({ title: 'Error', description: err.message, variant: 'destructive' })
+          toast.error('Error', { description: err.message })
         }
       },
     })
   }
 
   // ============================================================
-  // TAB 3: CORREDORES
+  // AGENT CRUD
   // ============================================================
   const handleCreateAgent = async () => {
-    if (!createAgentForm.name.trim() || !createAgentForm.email.trim()) {
-      toast({ title: 'Campos requeridos', description: 'Nombre y email son obligatorios', variant: 'destructive' })
-      return
-    }
-    if (!createAgentForm.password || createAgentForm.password.length < 8) {
-      toast({ title: 'Contraseña inválida', description: 'La contraseña debe tener al menos 8 caracteres', variant: 'destructive' })
-      return
-    }
-    if (createAgentForm.password !== createAgentForm.confirmPassword) {
-      toast({ title: 'Error', description: 'Las contraseñas no coinciden', variant: 'destructive' })
-      return
-    }
+    if (!agentForm.name.trim()) { toast.error('Campo requerido', { description: 'El nombre es obligatorio' }); return }
+    if (!agentForm.email.trim()) { toast.error('Campo requerido', { description: 'El email es obligatorio' }); return }
+    if (!agentForm.password || agentForm.password.length < 8) { toast.error('Contraseña inválida', { description: 'La contraseña debe tener al menos 8 caracteres' }); return }
+    if (agentForm.password !== agentForm.confirmPassword) { toast.error('Error', { description: 'Las contraseñas no coinciden' }); return }
+    if (isSuperAdmin && !agentForm.managerId) { toast.error('Campo requerido', { description: 'Debe asignar un administrador' }); return }
+
     try {
       setSaving(true)
-      const positionParts = [createAgentForm.position]
-      if (createAgentForm.office.trim()) positionParts.push(`Zona ${createAgentForm.office.trim()}`)
       await api.createAgent({
-        name: createAgentForm.name,
-        lastName: createAgentForm.lastName || undefined,
-        email: createAgentForm.email,
-        password: createAgentForm.password,
-        phone: createAgentForm.phone || undefined,
-        position: positionParts.join(' - ') || undefined,
-        isActive: createAgentForm.isActive,
-        documentType: createAgentForm.documentType,
-        documentNumber: createAgentForm.documentNumber || undefined,
-        office: createAgentForm.office || undefined,
-        managerId: createAgentForm.managerId || undefined,
+        name: agentForm.name,
+        lastName: agentForm.lastName || undefined,
+        email: agentForm.email,
+        password: agentForm.password,
+        phone: agentForm.phone || undefined,
+        managerId: isSuperAdmin ? agentForm.managerId : currentUser?.id,
+        isActive: agentForm.isActive,
       })
-      toast({ title: 'Corredor creado', description: 'El corredor/agente se ha creado correctamente' })
+      toast.success('Corredor creado correctamente')
       setCreateAgentOpen(false)
-      setCreateAgentForm(emptyCreateAgentForm)
-      setShowAgentPassword(false)
-      triggerRefresh()
+      setAgentForm({ name: '', lastName: '', email: '', password: '', confirmPassword: '', phone: '', managerId: '', isActive: true })
+      setShowPassword(false)
+      fetchAgents()
+      fetchSummary()
     } catch (err: any) {
-      toast({ title: 'Error al crear corredor', description: err.message, variant: 'destructive' })
+      toast.error('Error al crear corredor', { description: err.message })
     } finally {
       setSaving(false)
     }
   }
 
-  const handleEditAgent = async () => {
-    if (!editingAgent) return
-    if (!editAgentForm.name.trim() || !editAgentForm.email.trim()) {
-      toast({ title: 'Campos requeridos', description: 'Nombre y email son obligatorios', variant: 'destructive' })
-      return
-    }
-    if (editAgentForm.password && editAgentForm.password.length < 8) {
-      toast({ title: 'Contraseña inválida', description: 'La contraseña debe tener al menos 8 caracteres', variant: 'destructive' })
-      return
-    }
-    if (editAgentForm.password && editAgentForm.password !== editAgentForm.confirmPassword) {
-      toast({ title: 'Error', description: 'Las contraseñas no coinciden', variant: 'destructive' })
-      return
-    }
+  const handleUpdateAgent = async () => {
+    if (!editAgentForm.name.trim()) { toast.error('Campo requerido', { description: 'El nombre es obligatorio' }); return }
+    if (!editAgentForm.email.trim()) { toast.error('Campo requerido', { description: 'El email es obligatorio' }); return }
+    if (editAgentForm.password && editAgentForm.password.length < 8) { toast.error('Contraseña inválida', { description: 'La contraseña debe tener al menos 8 caracteres' }); return }
+    if (editAgentForm.password && editAgentForm.password !== editAgentForm.confirmPassword) { toast.error('Error', { description: 'Las contraseñas no coinciden' }); return }
+
     try {
       setSaving(true)
       const data: Record<string, unknown> = {
@@ -1054,1212 +436,1838 @@ export default function AdminPage() {
         lastName: editAgentForm.lastName || null,
         email: editAgentForm.email,
         phone: editAgentForm.phone || null,
-        position: editAgentForm.position || null,
-        documentType: editAgentForm.documentType,
-        documentNumber: editAgentForm.documentNumber || null,
-        office: editAgentForm.office || null,
+        isActive: editAgentForm.isActive,
       }
       if (editAgentForm.password) data.password = editAgentForm.password
-      await api.updateAgent(editingAgent.id, data)
-      toast({ title: 'Corredor actualizado', description: 'Los datos se han actualizado correctamente' })
+      if (isSuperAdmin && editAgentForm.managerId) data.managerId = editAgentForm.managerId
+      await api.updateAgent(editAgentForm.id, data)
+      toast.success('Corredor actualizado')
       setEditAgentOpen(false)
-      setEditingAgent(null)
-      setShowEditAgentPassword(false)
-      triggerRefresh()
+      setShowPassword(false)
+      fetchAgents()
+      fetchSummary()
     } catch (err: any) {
-      toast({ title: 'Error al actualizar', description: err.message, variant: 'destructive' })
+      toast.error('Error al actualizar', { description: err.message })
     } finally {
       setSaving(false)
     }
   }
 
-  const openEditAgent = (agent: AgentUser) => {
-    setEditingAgent(agent)
+  const handleOpenEditAgent = (agent: AgentWithStats) => {
     setEditAgentForm({
+      id: agent.id,
       name: agent.name,
       lastName: agent.lastName || '',
       email: agent.email,
-      phone: agent.phone || '',
-      documentType: agent.documentType || 'DNI',
-      documentNumber: agent.documentNumber || '',
       password: '',
       confirmPassword: '',
-      position: agent.position || '',
-      office: agent.office || '',
+      phone: agent.phone || '',
       managerId: agent.manager?.id || '',
       isActive: agent.isActive,
     })
     setEditAgentOpen(true)
   }
 
-  const openFicha = async (agent: AgentUser) => {
-    setFichaAgent(agent)
-    setFichaOpen(true)
-    setFichaLoading(true)
-    try {
-      const res = await api.getAgentPortfolio(agent.id)
-      setFichaClients(res.data.clients)
-      setFichaPolicies(res.data.policies)
-    } catch (err: any) {
-      toast({ title: 'Error al cargar cartera', description: err.message, variant: 'destructive' })
-      setFichaClients([])
-      setFichaPolicies([])
-    } finally {
-      setFichaLoading(false)
-    }
-  }
-
-  const handleToggleAgentStatus = (agent: AgentUser) => {
-    const fullName = `${agent.name} ${agent.lastName || ''}`.trim()
+  const handleToggleAgentStatus = (agent: AgentWithStats) => {
+    const fullName = formatName(agent.name, agent.lastName)
     setConfirmDialog({
       open: true,
       title: agent.isActive ? '¿Desactivar corredor?' : '¿Activar corredor?',
-      description: agent.isActive ? `¿Desactivar a ${fullName}? No podrá iniciar sesión ni recibir asignaciones.` : `¿Activar a ${fullName}?`,
+      description: agent.isActive
+        ? `¿Estás seguro de desactivar a ${fullName}? No podrá iniciar sesión ni recibir asignaciones.`
+        : `¿Estás seguro de activar a ${fullName}?`,
       variant: agent.isActive ? 'destructive' : 'default',
       onConfirm: async () => {
         try {
           await api.toggleAgentStatus(agent.id)
-          toast({ title: `Corredor ${agent.isActive ? 'desactivado' : 'activado'}` })
-          triggerRefresh()
+          toast.success(fullName + (agent.isActive ? ' desactivado' : ' activado'))
+          fetchAgents()
+          fetchSummary()
         } catch (err: any) {
-          toast({ title: 'Error', description: err.message, variant: 'destructive' })
+          toast.error('Error', { description: err.message })
         }
       },
     })
   }
 
-  const renderCorredores = () => {
-    const corredorContent = () => {
-      if (loadingAgents) {
-        return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <TableRowSkeleton key={i} />)}</div>
-      }
-      if (agents.length === 0) {
-        return <EmptyState icon={Briefcase} message="Todavía no hay corredores registrados." />
-      }
-
-      if (isMobile) {
-        return (
-          <div className="space-y-3">
-            {agents.map((agent) => (
-              <Card key={agent.id}>
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-medium text-sm">{agent.name} {agent.lastName || ''}</p>
-                      <p className="text-xs text-gray-500">{agent.email}</p>
-                    </div>
-                    {getStatusBadge(agent.isActive)}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div><span className="text-gray-500">Teléfono:</span> {agent.phone || '—'}</div>
-                    <div><span className="text-gray-500">DNI/NIE:</span> {agent.documentNumber || '—'}</div>
-                    {isSuperAdmin && agent.manager && <div className="col-span-2"><span className="text-gray-500">Admin:</span> {agent.manager.name} {agent.manager.lastName}</div>}
-                    <div><span className="text-gray-500">Clientes:</span> {agent._count?.assignedClients ?? 0}</div>
-                    <div><span className="text-gray-500">Pólizas:</span> {agent._count?.ownedPolicies ?? 0}</div>
-                  </div>
-                  <div className="flex gap-1.5 pt-1 flex-wrap">
-                    <Button size="sm" variant="outline" onClick={() => openFicha(agent)}><Eye className="h-3 w-3 mr-1" />Ficha</Button>
-                    <Button size="sm" variant="outline" onClick={() => openEditAgent(agent)}><Pencil className="h-3 w-3 mr-1" />Editar</Button>
-                    <Button size="sm" variant="outline" onClick={() => handleOpenResetPassword(agent as any)}><KeyRound className="h-3 w-3" /></Button>
-                    <Button size="sm" variant={agent.isActive ? 'outline' : 'default'} onClick={() => handleToggleAgentStatus(agent)}>
-                      {agent.isActive ? <UserX className="h-3 w-3" /> : <UserCheck className="h-3 w-3" />}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )
-      }
-
-      return (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Teléfono</TableHead>
-                <TableHead>DNI/NIE</TableHead>
-                {isSuperAdmin && <TableHead>Admin responsable</TableHead>}
-                <TableHead>Estado</TableHead>
-                <TableHead>Clientes</TableHead>
-                <TableHead>Pólizas</TableHead>
-                <TableHead>Última actividad</TableHead>
-                <TableHead>Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {agents.map((agent) => (
-                <TableRow key={agent.id}>
-                  <TableCell className="font-medium">{agent.name} {agent.lastName || ''}</TableCell>
-                  <TableCell className="text-sm">{agent.email}</TableCell>
-                  <TableCell className="text-sm">{agent.phone || '—'}</TableCell>
-                  <TableCell className="text-sm">{agent.documentNumber || '—'}</TableCell>
-                  {isSuperAdmin && <TableCell className="text-sm">{agent.manager ? `${agent.manager.name} ${agent.manager.lastName}` : '—'}</TableCell>}
-                  <TableCell>{getStatusBadge(agent.isActive)}</TableCell>
-                  <TableCell className="text-sm">{agent._count?.assignedClients ?? 0}</TableCell>
-                  <TableCell className="text-sm">{agent._count?.ownedPolicies ?? 0}</TableCell>
-                  <TableCell className="text-sm">{agent.lastLogin ? formatDistanceToNow(new Date(agent.lastLogin), { addSuffix: true, locale: es }) : 'Nunca'}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => openFicha(agent)} title="Ver ficha"><Eye className="h-4 w-4" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => openEditAgent(agent)} title="Editar"><Pencil className="h-4 w-4" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleOpenResetPassword(agent as any)} title="Reset contraseña"><KeyRound className="h-4 w-4" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleToggleAgentStatus(agent)} title={agent.isActive ? 'Desactivar' : 'Activar'}>
-                        {agent.isActive ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )
+  // ============================================================
+  // PORTFOLIO
+  // ============================================================
+  const handleOpenPortfolio = async (agentId: string) => {
+    setPortfolioAgentId(agentId)
+    setPortfolioOpen(true)
+    setPortfolioLoading(true)
+    try {
+      const res = await api.getAgentPortfolio(agentId)
+      setPortfolioData(res.data)
+    } catch (err: any) {
+      toast.error('Error al cargar cartera', { description: err.message })
+      setPortfolioData(null)
+    } finally {
+      setPortfolioLoading(false)
     }
-
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h2 className="text-lg font-semibold text-gray-900">Corredores</h2>
-          <Button onClick={() => {
-            setCreateAgentForm({
-              ...emptyCreateAgentForm,
-              managerId: !isSuperAdmin && currentUser?.id ? currentUser.id : '',
-            })
-            setCreateAgentOpen(true)
-          }}>
-            <Plus className="h-4 w-4 mr-1" /> Nuevo corredor
-          </Button>
-        </div>
-
-        {/* Filters */}
-        <div className="flex gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar corredores..."
-              value={agentsSearch}
-              onChange={(e) => { setAgentsSearch(e.target.value); setAgentsPage(1) }}
-            />
-          </div>
-          {isSuperAdmin && (
-            <Select value={agentsAdminFilter} onValueChange={(v) => { setAgentsAdminFilter(v === '__all__' ? '' : v); setAgentsPage(1) }}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filtrar por admin" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">Todos los admins</SelectItem>
-                {admins.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>{a.name} {a.lastName || ''}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-
-        {corredorContent()}
-
-        {/* Pagination */}
-        {totalAgents > 20 && (
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500">Mostrando {(agentsPage - 1) * 20 + 1}-{Math.min(agentsPage * 20, totalAgents)} de {totalAgents}</p>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={agentsPage === 1} onClick={() => setAgentsPage((p) => p - 1)}>Anterior</Button>
-              <Button size="sm" variant="outline" disabled={agentsPage * 20 >= totalAgents} onClick={() => setAgentsPage((p) => p + 1)}>Siguiente</Button>
-            </div>
-          </div>
-        )}
-      </div>
-    )
   }
 
   // ============================================================
-  // TAB 4: USUARIOS
+  // RESET PASSWORD
   // ============================================================
-  const handleCreateUser = async () => {
-    if (!createForm.name.trim() || !createForm.email.trim()) {
-      toast({ title: 'Campos requeridos', description: 'Nombre y email son obligatorios', variant: 'destructive' })
-      return
-    }
-    if (!createForm.password || createForm.password.length < 8) {
-      toast({ title: 'Contraseña inválida', description: 'La contraseña debe tener al menos 8 caracteres', variant: 'destructive' })
-      return
-    }
-    if (createForm.password !== createForm.confirmPassword) {
-      toast({ title: 'Error', description: 'Las contraseñas no coinciden', variant: 'destructive' })
-      return
-    }
-    if (!createForm.roleId) {
-      toast({ title: 'Campo requerido', description: 'Debe seleccionar un rol', variant: 'destructive' })
-      return
-    }
-    try {
-      setSaving(true)
-      await api.createUser({
-        name: createForm.name,
-        lastName: createForm.lastName || undefined,
-        email: createForm.email,
-        password: createForm.password,
-        phone: createForm.phone || undefined,
-        position: createForm.position || undefined,
-        roleId: createForm.roleId,
-        documentType: createForm.documentType,
-        documentNumber: createForm.documentNumber || undefined,
-        office: createForm.office || undefined,
-      })
-      toast({ title: 'Usuario creado', description: 'El usuario se ha creado correctamente' })
-      setCreateUserOpen(false)
-      setCreateForm(emptyCreateUserForm)
-      setShowPassword(false)
-      triggerRefresh()
-    } catch (err: any) {
-      toast({ title: 'Error al crear usuario', description: err.message, variant: 'destructive' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleEditUser = async () => {
-    if (!editingUser) return
-    if (!editForm.name.trim() || !editForm.email.trim()) {
-      toast({ title: 'Campos requeridos', description: 'Nombre y email son obligatorios', variant: 'destructive' })
-      return
-    }
-    if (editForm.password && editForm.password.length < 8) {
-      toast({ title: 'Contraseña inválida', description: 'La contraseña debe tener al menos 8 caracteres', variant: 'destructive' })
-      return
-    }
-    if (editForm.password && editForm.password !== editForm.confirmPassword) {
-      toast({ title: 'Error', description: 'Las contraseñas no coinciden', variant: 'destructive' })
-      return
-    }
-    try {
-      setSaving(true)
-      const data: Record<string, unknown> = {
-        name: editForm.name,
-        lastName: editForm.lastName || null,
-        email: editForm.email,
-        phone: editForm.phone || null,
-        position: editForm.position || null,
-        documentType: editForm.documentType,
-        documentNumber: editForm.documentNumber || null,
-        office: editForm.office || null,
-      }
-      if (editForm.password) data.password = editForm.password
-      await api.updateUser(editingUser.id, data)
-      toast({ title: 'Usuario actualizado', description: 'Los datos se han actualizado correctamente' })
-      setEditUserOpen(false)
-      setEditingUser(null)
-      setShowEditPassword(false)
-      triggerRefresh()
-    } catch (err: any) {
-      toast({ title: 'Error al actualizar', description: err.message, variant: 'destructive' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleViewUser = async (userId: string) => {
-    try {
-      const res = await api.getUser(userId)
-      setViewingUser(res.data)
-      setViewUserOpen(true)
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
-    }
-  }
-
-  const openEditUser = (u: AdminUser) => {
-    setEditingUser(u)
-    setEditForm({
-      name: u.name, lastName: u.lastName || '', email: u.email,
-      password: '', confirmPassword: '',
-      phone: u.phone || '', position: u.position || '',
-      documentType: (u as any).documentType || 'DNI',
-      documentNumber: (u as any).documentNumber || '',
-      office: (u as any).office || '',
-    })
-    setEditUserOpen(true)
-  }
-
-  const handleChangeRole = async () => {
-    if (!changingRoleUser || !selectedNewRole) return
-    try {
-      setSaving(true)
-      await api.updateUserRole(changingRoleUser.id, selectedNewRole)
-      const newRoleObj = roles.find((r) => r.id === selectedNewRole)
-      toast({ title: 'Rol actualizado', description: `Se asignó el rol de ${roleConfig[newRoleObj?.name || '']?.label || newRoleObj?.name || ''}` })
-      setChangeRoleOpen(false)
-      setChangingRoleUser(null)
-      setSelectedNewRole('')
-      triggerRefresh()
-    } catch (err: any) {
-      toast({ title: 'Error al cambiar rol', description: err.message, variant: 'destructive' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleToggleUserStatus = (targetUser: AdminUser) => {
-    if (targetUser.id === currentUser?.id) {
-      toast({ title: 'Acción no permitida', description: 'No puedes cambiar tu propio estado', variant: 'destructive' })
-      return
-    }
-    const fullName = `${targetUser.name} ${targetUser.lastName || ''}`.trim()
-    setConfirmDialog({
-      open: true,
-      title: targetUser.isActive ? '¿Desactivar usuario?' : '¿Activar usuario?',
-      description: targetUser.isActive ? `¿Desactivar a ${fullName}? No podrá iniciar sesión.` : `¿Activar a ${fullName}?`,
-      variant: targetUser.isActive ? 'destructive' : 'default',
-      onConfirm: async () => {
-        try {
-          await api.toggleUserStatus(targetUser.id)
-          toast({ title: `Usuario ${targetUser.isActive ? 'desactivado' : 'activado'}` })
-          triggerRefresh()
-        } catch (err: any) {
-          toast({ title: 'Error', description: err.message, variant: 'destructive' })
-        }
-      },
-    })
-  }
-
-  // Reset password
-  const handleOpenResetPassword = (user: AdminUser) => {
-    setResetPasswordUser(user)
-    setNewPassword('')
-    setConfirmNewPassword('')
-    setShowNewPassword(false)
+  const handleOpenResetPassword = (userId: string, userName: string) => {
+    setResetPasswordForm({ userId, userName, newPassword: '', confirmPassword: '' })
     setResetPasswordOpen(true)
   }
 
   const handleResetPassword = async () => {
-    if (!resetPasswordUser) return
-    if (!newPassword || newPassword.length < 8) {
-      toast({ title: 'Contraseña inválida', description: 'La contraseña debe tener al menos 8 caracteres', variant: 'destructive' })
+    if (!resetPasswordForm.newPassword || resetPasswordForm.newPassword.length < 8) {
+      toast.error('Contraseña inválida', { description: 'La contraseña debe tener al menos 8 caracteres' })
       return
     }
-    if (newPassword !== confirmNewPassword) {
-      toast({ title: 'Error', description: 'Las contraseñas no coinciden', variant: 'destructive' })
+    if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
+      toast.error('Error', { description: 'Las contraseñas no coinciden' })
       return
     }
     try {
       setSaving(true)
-      await api.resetUserPassword(resetPasswordUser.id, { newPassword })
-      toast({ title: 'Contraseña actualizada', description: `La contraseña de ${resetPasswordUser.name} ha sido actualizada` })
+      await api.resetUserPassword(resetPasswordForm.userId, resetPasswordForm.newPassword)
+      toast.success('Contraseña restablecida', { description: `Se ha restablecido la contraseña de ${resetPasswordForm.userName}` })
       setResetPasswordOpen(false)
-      setResetPasswordUser(null)
     } catch (err: any) {
-      toast({ title: 'Error al resetear contraseña', description: err.message, variant: 'destructive' })
+      toast.error('Error al restablecer contraseña', { description: err.message })
     } finally {
       setSaving(false)
     }
   }
 
-  const renderUsuarios = () => {
-    if (!isSuperAdmin) return null
+  // ============================================================
+  // NAVIGATION HELPERS
+  // ============================================================
+  const handleViewAdminCorredores = (adminId: string) => {
+    setAgentsManagerFilter(adminId)
+    setActiveTab('agents')
+  }
 
-    const usersContent = () => {
-      if (loadingUsers) {
-        return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <TableRowSkeleton key={i} />)}</div>
-      }
-      if (users.length === 0) {
-        return <EmptyState icon={Users} message="Todavía no hay usuarios registrados." />
-      }
+  // ============================================================
+  // SKELETON LOADERS
+  // ============================================================
+  const KpiSkeleton = () => (
+    <Card>
+      <CardContent className="p-6">
+        <Skeleton className="h-4 w-24 mb-2" />
+        <Skeleton className="h-8 w-16" />
+      </CardContent>
+    </Card>
+  )
 
-      if (isMobile) {
-        return (
-          <div className="space-y-3">
-            {users.map((u) => (
-              <Card key={u.id}>
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-medium text-sm">{u.name} {u.lastName || ''}</p>
-                      <p className="text-xs text-gray-500">{u.email}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      {getRoleBadge(u.role?.name || '')}
-                      {getStatusBadge(u.isActive)}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div><span className="text-gray-500">Teléfono:</span> {u.phone || '—'}</div>
-                    <div><span className="text-gray-500">Cargo:</span> {u.position || '—'}</div>
-                    <div><span className="text-gray-500">DNI/NIE:</span> {(u as any).documentNumber || '—'}</div>
-                    <div><span className="text-gray-500">Último acceso:</span> {u.lastLogin ? format(new Date(u.lastLogin), 'dd/MM/yy') : 'Nunca'}</div>
-                  </div>
-                  <div className="flex gap-1.5 pt-1 flex-wrap">
-                    <Button size="sm" variant="outline" onClick={() => handleViewUser(u.id)}><Eye className="h-3 w-3 mr-1" />Ver</Button>
-                    <Button size="sm" variant="outline" onClick={() => openEditUser(u)}><Pencil className="h-3 w-3 mr-1" />Editar</Button>
-                    <Button size="sm" variant="outline" onClick={() => handleOpenResetPassword(u)}><KeyRound className="h-3 w-3" /></Button>
-                    <Button size="sm" variant="outline" onClick={() => { setChangingRoleUser(u); setSelectedNewRole(u.roleId || ''); setChangeRoleOpen(true) }}><ShieldCheck className="h-3 w-3" /></Button>
-                    <Button size="sm" variant={u.isActive ? 'outline' : 'default'} onClick={() => handleToggleUserStatus(u)}>
-                      {u.isActive ? <UserX className="h-3 w-3" /> : <UserCheck className="h-3 w-3" />}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+  const TableSkeleton = () => (
+    <div className="space-y-3">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-12" />
+          <Skeleton className="h-4 w-12" />
+          <Skeleton className="h-4 w-20" />
+        </div>
+      ))}
+    </div>
+  )
+
+  // ============================================================
+  // PASSWORD INPUT WITH TOGGLE
+  // ============================================================
+  const PasswordInput = ({ value, onChange, placeholder, id }: {
+    value: string; onChange: (v: string) => void; placeholder: string; id?: string
+  }) => (
+    <div className="relative">
+      <Input
+        id={id}
+        className={isMobile ? 'h-11 pr-10' : 'pr-10'}
+        type={showPassword ? 'text' : 'password'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+        onClick={() => setShowPassword(!showPassword)}
+      >
+        {showPassword ? <Eye className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
+  )
+
+  // ============================================================
+  // ADMIN FORM (Create/Edit)
+  // ============================================================
+  const AdminFormContent = ({ form, setForm, isEdit }: {
+    form: typeof adminForm | typeof editAdminForm
+    setForm: React.Dispatch<React.SetStateAction<typeof adminForm>> | React.Dispatch<React.SetStateAction<typeof editAdminForm>>
+    isEdit: boolean
+  }) => (
+    <ScrollArea className={isMobile ? 'max-h-[60vh]' : 'max-h-[70vh]'}>
+      <div className="space-y-4 pr-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-sm">Nombre *</Label>
+            <Input
+              className={isMobile ? 'h-11' : ''}
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value } as any)}
+              placeholder="Nombre"
+            />
           </div>
-        )
-      }
-
-      return (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Teléfono</TableHead>
-                <TableHead>Cargo</TableHead>
-                <TableHead>DNI/NIE</TableHead>
-                <TableHead>Rol</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Último acceso</TableHead>
-                <TableHead>Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell className="font-medium">{u.name} {u.lastName || ''}</TableCell>
-                  <TableCell className="text-sm">{u.email}</TableCell>
-                  <TableCell className="text-sm">{u.phone || '—'}</TableCell>
-                  <TableCell className="text-sm">{u.position || '—'}</TableCell>
-                  <TableCell className="text-sm">{(u as any).documentNumber || '—'}</TableCell>
-                  <TableCell>{getRoleBadge(u.role?.name || '')}</TableCell>
-                  <TableCell>{getStatusBadge(u.isActive)}</TableCell>
-                  <TableCell className="text-sm">{u.lastLogin ? format(new Date(u.lastLogin), 'dd/MM/yy HH:mm') : 'Nunca'}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => handleViewUser(u.id)} title="Ver"><Eye className="h-4 w-4" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => openEditUser(u)} title="Editar"><Pencil className="h-4 w-4" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleOpenResetPassword(u)} title="Reset contraseña"><KeyRound className="h-4 w-4" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => { setChangingRoleUser(u); setSelectedNewRole(u.roleId || ''); setChangeRoleOpen(true) }} title="Cambiar rol"><ShieldCheck className="h-4 w-4" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleToggleUserStatus(u)} title={u.isActive ? 'Desactivar' : 'Activar'}>
-                        {u.isActive ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )
-    }
-
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h2 className="text-lg font-semibold text-gray-900">Usuarios</h2>
-          <Button onClick={() => { setCreateForm(emptyCreateUserForm); setCreateUserOpen(true) }}>
-            <Plus className="h-4 w-4 mr-1" /> Nuevo usuario
-          </Button>
-        </div>
-
-        <div className="flex gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input className="pl-9" placeholder="Buscar usuarios..." value={usersSearch} onChange={(e) => { setUsersSearch(e.target.value); setUsersPage(1) }} />
+          <div className="space-y-1.5">
+            <Label className="text-sm">Apellidos</Label>
+            <Input
+              className={isMobile ? 'h-11' : ''}
+              value={form.lastName}
+              onChange={(e) => setForm({ ...form, lastName: e.target.value } as any)}
+              placeholder="Apellidos"
+            />
           </div>
-          <Select value={usersRoleFilter} onValueChange={(v) => { setUsersRoleFilter(v === '__all__' ? '' : v); setUsersPage(1) }}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filtrar por rol" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Todos los roles</SelectItem>
-              {allRoleKeys.map((rk) => (
-                <SelectItem key={rk} value={rk}>{roleConfig[rk]?.label || rk}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
-        {usersContent()}
+        <div className="space-y-1.5">
+          <Label className="text-sm">Email *</Label>
+          <Input
+            className={isMobile ? 'h-11' : ''}
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value } as any)}
+            placeholder="email@ejemplo.com"
+          />
+        </div>
 
-        {totalUsers > 20 && (
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500">Mostrando {(usersPage - 1) * 20 + 1}-{Math.min(usersPage * 20, totalUsers)} de {totalUsers}</p>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={usersPage === 1} onClick={() => setUsersPage((p) => p - 1)}>Anterior</Button>
-              <Button size="sm" variant="outline" disabled={usersPage * 20 >= totalUsers} onClick={() => setUsersPage((p) => p + 1)}>Siguiente</Button>
-            </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-sm">{isEdit ? 'Nueva contraseña' : 'Contraseña temporal *'}</Label>
+            <PasswordInput
+              value={form.password}
+              onChange={(v) => setForm({ ...form, password: v } as any)}
+              placeholder={isEdit ? 'Dejar vacío para no cambiar' : 'Mínimo 8 caracteres'}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm">Confirmar contraseña {isEdit ? '' : '*'}</Label>
+            <Input
+              className={isMobile ? 'h-11' : ''}
+              type={showPassword ? 'text' : 'password'}
+              value={form.confirmPassword}
+              onChange={(e) => setForm({ ...form, confirmPassword: e.target.value } as any)}
+              placeholder="Repetir contraseña"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-sm">Teléfono</Label>
+            <Input
+              className={isMobile ? 'h-11' : ''}
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value } as any)}
+              placeholder="+34 600 000 000"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm">Oficina / Zona</Label>
+            <Input
+              className={isMobile ? 'h-11' : ''}
+              value={form.office}
+              onChange={(e) => setForm({ ...form, office: e.target.value } as any)}
+              placeholder="Ej: Madrid Centro"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-sm">Tipo de documento</Label>
+            <Select
+              value={form.documentType}
+              onValueChange={(v) => setForm({ ...form, documentType: v } as any)}
+            >
+              <SelectTrigger className={isMobile ? 'h-11' : ''}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DNI">DNI</SelectItem>
+                <SelectItem value="NIE">NIE</SelectItem>
+                <SelectItem value="Pasaporte">Pasaporte</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm">Número de documento</Label>
+            <Input
+              className={isMobile ? 'h-11' : ''}
+              value={form.documentNumber}
+              onChange={(e) => setForm({ ...form, documentNumber: e.target.value } as any)}
+              placeholder="Ej: 12345678A"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Switch
+            checked={form.isActive}
+            onCheckedChange={(v) => setForm({ ...form, isActive: v } as any)}
+          />
+          <Label className="text-sm">{form.isActive ? 'Cuenta activa' : 'Cuenta inactiva'}</Label>
+        </div>
+      </div>
+    </ScrollArea>
+  )
+
+  // ============================================================
+  // AGENT FORM (Create/Edit)
+  // ============================================================
+  const AgentFormContent = ({ form, setForm, isEdit }: {
+    form: typeof agentForm | typeof editAgentForm
+    setForm: React.Dispatch<React.SetStateAction<typeof agentForm>> | React.Dispatch<React.SetStateAction<typeof editAgentForm>>
+    isEdit: boolean
+  }) => (
+    <ScrollArea className={isMobile ? 'max-h-[60vh]' : 'max-h-[70vh]'}>
+      <div className="space-y-4 pr-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-sm">Nombre *</Label>
+            <Input
+              className={isMobile ? 'h-11' : ''}
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value } as any)}
+              placeholder="Nombre"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm">Apellidos</Label>
+            <Input
+              className={isMobile ? 'h-11' : ''}
+              value={form.lastName}
+              onChange={(e) => setForm({ ...form, lastName: e.target.value } as any)}
+              placeholder="Apellidos"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-sm">Email *</Label>
+          <Input
+            className={isMobile ? 'h-11' : ''}
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value } as any)}
+            placeholder="email@ejemplo.com"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-sm">{isEdit ? 'Nueva contraseña' : 'Contraseña temporal *'}</Label>
+            <PasswordInput
+              value={form.password}
+              onChange={(v) => setForm({ ...form, password: v } as any)}
+              placeholder={isEdit ? 'Dejar vacío para no cambiar' : 'Mínimo 8 caracteres'}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm">Confirmar contraseña {isEdit ? '' : '*'}</Label>
+            <Input
+              className={isMobile ? 'h-11' : ''}
+              type={showPassword ? 'text' : 'password'}
+              value={form.confirmPassword}
+              onChange={(e) => setForm({ ...form, confirmPassword: e.target.value } as any)}
+              placeholder="Repetir contraseña"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-sm">Teléfono</Label>
+          <Input
+            className={isMobile ? 'h-11' : ''}
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value } as any)}
+            placeholder="+34 600 000 000"
+          />
+        </div>
+
+        {isSuperAdmin && (
+          <div className="space-y-1.5">
+            <Label className="text-sm">Administrador asignado *</Label>
+            <Select
+              value={form.managerId}
+              onValueChange={(v) => setForm({ ...form, managerId: v } as any)}
+            >
+              <SelectTrigger className={isMobile ? 'h-11' : ''}>
+                <SelectValue placeholder="Seleccionar administrador" />
+              </SelectTrigger>
+              <SelectContent>
+                {admins.map((admin) => (
+                  <SelectItem key={admin.id} value={admin.id}>
+                    {formatName(admin.name, admin.lastName)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
-      </div>
-    )
-  }
 
-  // ============================================================
-  // TAB 5: ROLES Y PERMISOS
-  // ============================================================
-  const renderRoles = () => {
-    if (!isSuperAdmin) return null
-
-    return (
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">Roles y Permisos</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {roles.map((role) => {
-            const config = roleConfig[role.name]
-            const permsByModule = role.permissions.reduce<Record<string, typeof role.permissions>>((acc, p) => {
-              if (!acc[p.module]) acc[p.module] = []
-              acc[p.module].push(p)
-              return acc
-            }, {})
-
-            return (
-              <Card key={role.id}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <Badge className={`${config?.color || 'bg-gray-100 text-gray-700'} border-0`}>
-                      {config?.label || role.name}
-                    </Badge>
-                    <span className="text-xs text-gray-400">{role._count.users} {role._count.users === 1 ? 'usuario' : 'usuarios'}</span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">{role.description || config?.description || ''}</p>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {Object.entries(permsByModule).map(([module, perms]) => (
-                      <div key={module}>
-                        <p className="text-[10px] font-semibold text-gray-500 uppercase mb-1">{module}</p>
-                        <div className="flex flex-wrap gap-1">
-                          {perms.map((p) => (
-                            <Badge key={p.id} variant="outline" className="text-[9px] py-0">{p.action}</Badge>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                    {Object.keys(permsByModule).length === 0 && (
-                      <p className="text-xs text-gray-400 italic">Sin permisos asignados</p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
+        <div className="flex items-center gap-3">
+          <Switch
+            checked={form.isActive}
+            onCheckedChange={(v) => setForm({ ...form, isActive: v } as any)}
+          />
+          <Label className="text-sm">{form.isActive ? 'Cuenta activa' : 'Cuenta inactiva'}</Label>
         </div>
       </div>
-    )
-  }
-
-  // ============================================================
-  // TAB 6: AUDITORÍA
-  // ============================================================
-  const renderAuditoria = () => {
-    const auditContent = () => {
-      if (loadingAuditLogs) {
-        return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <TableRowSkeleton key={i} />)}</div>
-      }
-      if (auditLogs.length === 0) {
-        return <EmptyState icon={ClipboardList} message="No se encontraron registros de auditoría." />
-      }
-
-      return (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Usuario</TableHead>
-                <TableHead>Acción</TableHead>
-                <TableHead>Entidad</TableHead>
-                <TableHead>Detalles</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {auditLogs.map((log) => (
-                <TableRow key={log.id} className="cursor-pointer hover:bg-gray-50" onClick={() => setExpandedAuditId(expandedAuditId === log.id ? null : log.id)}>
-                  <TableCell className="text-sm whitespace-nowrap">{format(new Date(log.createdAt), 'dd/MM/yy HH:mm')}</TableCell>
-                  <TableCell className="text-sm">
-                    {log.user ? `${log.user.name} ${log.user.lastName || ''}` : 'Sistema'}
-                    {log.user?.role && <span className="ml-1">{getRoleBadge(log.user.role.name)}</span>}
-                  </TableCell>
-                  <TableCell><Badge variant="outline" className="text-[10px]">{log.action}</Badge></TableCell>
-                  <TableCell className="text-sm capitalize">{log.entity}</TableCell>
-                  <TableCell className="text-sm max-w-[200px] truncate">{log.details || '—'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )
-    }
-
-    return (
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">Auditoría</h2>
-
-        <div className="flex gap-2 flex-wrap">
-          <Select value={auditActionFilter} onValueChange={(v) => { setAuditActionFilter(v === '__all__' ? '' : v); setAuditPage(1) }}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Tipo de acción" />
-            </SelectTrigger>
-            <SelectContent>
-              {auditActionOptions.map((opt) => (
-                <SelectItem key={opt.value || '__all__'} value={opt.value || '__all__'}>{opt.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={auditEntityFilter} onValueChange={(v) => { setAuditEntityFilter(v === '__all__' ? '' : v); setAuditPage(1) }}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Tipo de entidad" />
-            </SelectTrigger>
-            <SelectContent>
-              {auditEntityOptions.map((opt) => (
-                <SelectItem key={opt.value || '__all__'} value={opt.value || '__all__'}>{opt.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {auditContent()}
-
-        {totalAuditLogs > 20 && (
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500">Mostrando {(auditPage - 1) * 20 + 1}-{Math.min(auditPage * 20, totalAuditLogs)} de {totalAuditLogs}</p>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={auditPage === 1} onClick={() => setAuditPage((p) => p - 1)}>Anterior</Button>
-              <Button size="sm" variant="outline" disabled={auditPage * 20 >= totalAuditLogs} onClick={() => setAuditPage((p) => p + 1)}>Siguiente</Button>
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // ============================================================
-  // DIALOGS & SHEETS
-  // ============================================================
-
-  // --- Create Admin Dialog ---
-  const createAdminFormContent = (
-    <div className="space-y-4">
-      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-        <div className="flex items-center gap-2 mb-1">
-          <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">Administrador</Badge>
-          <span className="text-xs text-gray-500">Rol asignado automáticamente</span>
-        </div>
-        <p className="text-xs text-emerald-600">El usuario se creará con rol de Administrador.</p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Nombre *</Label><Input className={isMobile ? 'h-11' : ''} value={createAdminForm.name} onChange={(e) => setCreateAdminForm({ ...createAdminForm, name: e.target.value })} placeholder="Nombre" /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Apellidos</Label><Input className={isMobile ? 'h-11' : ''} value={createAdminForm.lastName} onChange={(e) => setCreateAdminForm({ ...createAdminForm, lastName: e.target.value })} placeholder="Apellidos" /></div>
-      </div>
-      <div className="space-y-1.5"><Label className="text-sm">Email *</Label><Input className={isMobile ? 'h-11' : ''} type="email" value={createAdminForm.email} onChange={(e) => setCreateAdminForm({ ...createAdminForm, email: e.target.value })} placeholder="email@ejemplo.com" /></div>
-      <div className="space-y-1.5"><Label className="text-sm">Teléfono</Label><Input className={isMobile ? 'h-11' : ''} value={createAdminForm.phone} onChange={(e) => setCreateAdminForm({ ...createAdminForm, phone: e.target.value })} placeholder="+34 600 000 000" /></div>
-      <DocumentTypeSelector value={createAdminForm.documentType} onChange={(v) => setCreateAdminForm({ ...createAdminForm, documentType: v })} documentNumber={createAdminForm.documentNumber} onDocumentNumberChange={(v) => setCreateAdminForm({ ...createAdminForm, documentNumber: v })} isMobile={isMobile} />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-sm">Contraseña temporal *</Label>
-          <div className="relative">
-            <Input className={isMobile ? 'h-11 pr-10' : 'pr-10'} type={showAdminPassword ? 'text' : 'password'} value={createAdminForm.password} onChange={(e) => setCreateAdminForm({ ...createAdminForm, password: e.target.value })} placeholder="Mínimo 8 caracteres" />
-            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" onClick={() => setShowAdminPassword(!showAdminPassword)}><Eye className="h-4 w-4" /></button>
-          </div>
-        </div>
-        <div className="space-y-1.5"><Label className="text-sm">Confirmar contraseña *</Label><Input className={isMobile ? 'h-11' : ''} type={showAdminPassword ? 'text' : 'password'} value={createAdminForm.confirmPassword} onChange={(e) => setCreateAdminForm({ ...createAdminForm, confirmPassword: e.target.value })} placeholder="Repetir contraseña" /></div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Cargo</Label><Input className={isMobile ? 'h-11' : ''} value={createAdminForm.position} onChange={(e) => setCreateAdminForm({ ...createAdminForm, position: e.target.value })} placeholder="Ej: Director de oficina" /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Oficina/Zona</Label><Input className={isMobile ? 'h-11' : ''} value={createAdminForm.office} onChange={(e) => setCreateAdminForm({ ...createAdminForm, office: e.target.value })} placeholder="Ej: Oficina Madrid" /></div>
-      </div>
-      <div className="flex items-center justify-between">
-        <div><Label className="text-sm">Estado activo</Label><p className="text-xs text-gray-500">Los administradores activos pueden iniciar sesión</p></div>
-        <Switch checked={createAdminForm.isActive} onCheckedChange={(checked) => setCreateAdminForm({ ...createAdminForm, isActive: checked })} />
-      </div>
-    </div>
+    </ScrollArea>
   )
 
-  // --- Edit Admin Dialog ---
-  const editAdminFormContent = (
+  // ============================================================
+  // RESET PASSWORD FORM
+  // ============================================================
+  const ResetPasswordContent = () => (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Nombre *</Label><Input className={isMobile ? 'h-11' : ''} value={editAdminForm.name} onChange={(e) => setEditAdminForm({ ...editAdminForm, name: e.target.value })} /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Apellidos</Label><Input className={isMobile ? 'h-11' : ''} value={editAdminForm.lastName} onChange={(e) => setEditAdminForm({ ...editAdminForm, lastName: e.target.value })} /></div>
-      </div>
-      <div className="space-y-1.5"><Label className="text-sm">Email *</Label><Input className={isMobile ? 'h-11' : ''} type="email" value={editAdminForm.email} onChange={(e) => setEditAdminForm({ ...editAdminForm, email: e.target.value })} /></div>
-      <div className="space-y-1.5"><Label className="text-sm">Teléfono</Label><Input className={isMobile ? 'h-11' : ''} value={editAdminForm.phone} onChange={(e) => setEditAdminForm({ ...editAdminForm, phone: e.target.value })} /></div>
-      <DocumentTypeSelector value={editAdminForm.documentType} onChange={(v) => setEditAdminForm({ ...editAdminForm, documentType: v })} documentNumber={editAdminForm.documentNumber} onDocumentNumberChange={(v) => setEditAdminForm({ ...editAdminForm, documentNumber: v })} isMobile={isMobile} />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-sm">Nueva contraseña (opcional)</Label>
-          <div className="relative">
-            <Input className={isMobile ? 'h-11 pr-10' : 'pr-10'} type={showEditAdminPassword ? 'text' : 'password'} value={editAdminForm.password} onChange={(e) => setEditAdminForm({ ...editAdminForm, password: e.target.value })} placeholder="Dejar vacío para no cambiar" />
-            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" onClick={() => setShowEditAdminPassword(!showEditAdminPassword)}><Eye className="h-4 w-4" /></button>
-          </div>
-        </div>
-        <div className="space-y-1.5"><Label className="text-sm">Confirmar contraseña</Label><Input className={isMobile ? 'h-11' : ''} type={showEditAdminPassword ? 'text' : 'password'} value={editAdminForm.confirmPassword} onChange={(e) => setEditAdminForm({ ...editAdminForm, confirmPassword: e.target.value })} placeholder="Repetir" disabled={!editAdminForm.password} /></div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Cargo</Label><Input className={isMobile ? 'h-11' : ''} value={editAdminForm.position} onChange={(e) => setEditAdminForm({ ...editAdminForm, position: e.target.value })} /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Oficina/Zona</Label><Input className={isMobile ? 'h-11' : ''} value={editAdminForm.office} onChange={(e) => setEditAdminForm({ ...editAdminForm, office: e.target.value })} /></div>
-      </div>
-      <div className="flex items-center justify-between">
-        <Label className="text-sm">Estado activo</Label>
-        <Switch checked={editAdminForm.isActive} onCheckedChange={(checked) => setEditAdminForm({ ...editAdminForm, isActive: checked })} />
-      </div>
-      {editingAdmin && (
-        <div className="p-3 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-500 mb-1">Rol actual</p>
-          <div className="flex items-center gap-2">
-            {getRoleBadge(editingAdmin.role?.name || '')}
-            <span className="text-xs text-gray-400">Usa "Cambiar rol" para modificar</span>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-
-  // --- Create Agent Dialog ---
-  const createAgentFormContent = (
-    <div className="space-y-4">
-      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-        <div className="flex items-center gap-2 mb-1">
-          <Badge className="bg-teal-100 text-teal-700 border-0 text-[10px]">Corredor/Agente</Badge>
-          <span className="text-xs text-gray-500">Rol asignado automáticamente</span>
-        </div>
-        <p className="text-xs text-emerald-600">El usuario se creará con rol de Corredor/Agente de seguros.</p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Nombre *</Label><Input className={isMobile ? 'h-11' : ''} value={createAgentForm.name} onChange={(e) => setCreateAgentForm({ ...createAgentForm, name: e.target.value })} placeholder="Nombre" /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Apellidos</Label><Input className={isMobile ? 'h-11' : ''} value={createAgentForm.lastName} onChange={(e) => setCreateAgentForm({ ...createAgentForm, lastName: e.target.value })} placeholder="Apellidos" /></div>
-      </div>
-      <div className="space-y-1.5"><Label className="text-sm">Email *</Label><Input className={isMobile ? 'h-11' : ''} type="email" value={createAgentForm.email} onChange={(e) => setCreateAgentForm({ ...createAgentForm, email: e.target.value })} placeholder="email@ejemplo.com" /></div>
-      <div className="space-y-1.5"><Label className="text-sm">Teléfono</Label><Input className={isMobile ? 'h-11' : ''} value={createAgentForm.phone} onChange={(e) => setCreateAgentForm({ ...createAgentForm, phone: e.target.value })} placeholder="+34 600 000 000" /></div>
-      <DocumentTypeSelector value={createAgentForm.documentType} onChange={(v) => setCreateAgentForm({ ...createAgentForm, documentType: v })} documentNumber={createAgentForm.documentNumber} onDocumentNumberChange={(v) => setCreateAgentForm({ ...createAgentForm, documentNumber: v })} isMobile={isMobile} />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-sm">Contraseña temporal *</Label>
-          <div className="relative">
-            <Input className={isMobile ? 'h-11 pr-10' : 'pr-10'} type={showAgentPassword ? 'text' : 'password'} value={createAgentForm.password} onChange={(e) => setCreateAgentForm({ ...createAgentForm, password: e.target.value })} placeholder="Mínimo 8 caracteres" />
-            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" onClick={() => setShowAgentPassword(!showAgentPassword)}><Eye className="h-4 w-4" /></button>
-          </div>
-        </div>
-        <div className="space-y-1.5"><Label className="text-sm">Confirmar contraseña *</Label><Input className={isMobile ? 'h-11' : ''} type={showAgentPassword ? 'text' : 'password'} value={createAgentForm.confirmPassword} onChange={(e) => setCreateAgentForm({ ...createAgentForm, confirmPassword: e.target.value })} placeholder="Repetir contraseña" /></div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Cargo</Label><Input className={isMobile ? 'h-11' : ''} value={createAgentForm.position} onChange={(e) => setCreateAgentForm({ ...createAgentForm, position: e.target.value })} placeholder="Corredor de Seguros" /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Oficina/Zona</Label><Input className={isMobile ? 'h-11' : ''} value={createAgentForm.office} onChange={(e) => setCreateAgentForm({ ...createAgentForm, office: e.target.value })} placeholder="Ej: Zona Norte, Oficina Madrid" /></div>
-      </div>
-      {isSuperAdmin && (
-        <div className="space-y-1.5">
-          <Label className="text-sm">Administrador responsable</Label>
-          <Select value={createAgentForm.managerId} onValueChange={(v) => setCreateAgentForm({ ...createAgentForm, managerId: v })}>
-            <SelectTrigger className={isMobile ? 'h-11' : ''}>
-              <SelectValue placeholder="Seleccionar administrador" />
-            </SelectTrigger>
-            <SelectContent>
-              {admins.map((a) => (
-                <SelectItem key={a.id} value={a.id}>{a.name} {a.lastName || ''}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-      {!isSuperAdmin && currentUser && (
-        <div className="p-3 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-500">Administrador responsable: <span className="font-medium">{currentUser.name} {currentUser.lastName || ''}</span> (asignado automáticamente)</p>
-        </div>
-      )}
-      <div className="flex items-center justify-between">
-        <div><Label className="text-sm">Estado</Label><p className="text-xs text-gray-500">Los corredores activos pueden iniciar sesión y recibir asignaciones</p></div>
-        <Switch checked={createAgentForm.isActive} onCheckedChange={(checked) => setCreateAgentForm({ ...createAgentForm, isActive: checked })} />
-      </div>
-    </div>
-  )
-
-  // --- Edit Agent Dialog ---
-  const editAgentFormContent = (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Nombre *</Label><Input className={isMobile ? 'h-11' : ''} value={editAgentForm.name} onChange={(e) => setEditAgentForm({ ...editAgentForm, name: e.target.value })} /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Apellidos</Label><Input className={isMobile ? 'h-11' : ''} value={editAgentForm.lastName} onChange={(e) => setEditAgentForm({ ...editAgentForm, lastName: e.target.value })} /></div>
-      </div>
-      <div className="space-y-1.5"><Label className="text-sm">Email *</Label><Input className={isMobile ? 'h-11' : ''} type="email" value={editAgentForm.email} onChange={(e) => setEditAgentForm({ ...editAgentForm, email: e.target.value })} /></div>
-      <div className="space-y-1.5"><Label className="text-sm">Teléfono</Label><Input className={isMobile ? 'h-11' : ''} value={editAgentForm.phone} onChange={(e) => setEditAgentForm({ ...editAgentForm, phone: e.target.value })} /></div>
-      <DocumentTypeSelector value={editAgentForm.documentType} onChange={(v) => setEditAgentForm({ ...editAgentForm, documentType: v })} documentNumber={editAgentForm.documentNumber} onDocumentNumberChange={(v) => setEditAgentForm({ ...editAgentForm, documentNumber: v })} isMobile={isMobile} />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-sm">Nueva contraseña (opcional)</Label>
-          <div className="relative">
-            <Input className={isMobile ? 'h-11 pr-10' : 'pr-10'} type={showEditAgentPassword ? 'text' : 'password'} value={editAgentForm.password} onChange={(e) => setEditAgentForm({ ...editAgentForm, password: e.target.value })} placeholder="Dejar vacío para no cambiar" />
-            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" onClick={() => setShowEditAgentPassword(!showEditAgentPassword)}><Eye className="h-4 w-4" /></button>
-          </div>
-        </div>
-        <div className="space-y-1.5"><Label className="text-sm">Confirmar contraseña</Label><Input className={isMobile ? 'h-11' : ''} type={showEditAgentPassword ? 'text' : 'password'} value={editAgentForm.confirmPassword} onChange={(e) => setEditAgentForm({ ...editAgentForm, confirmPassword: e.target.value })} placeholder="Repetir" disabled={!editAgentForm.password} /></div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Cargo</Label><Input className={isMobile ? 'h-11' : ''} value={editAgentForm.position} onChange={(e) => setEditAgentForm({ ...editAgentForm, position: e.target.value })} /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Oficina/Zona</Label><Input className={isMobile ? 'h-11' : ''} value={editAgentForm.office} onChange={(e) => setEditAgentForm({ ...editAgentForm, office: e.target.value })} /></div>
-      </div>
-      {isSuperAdmin && (
-        <div className="space-y-1.5">
-          <Label className="text-sm">Administrador responsable</Label>
-          <Select value={editAgentForm.managerId} onValueChange={(v) => setEditAgentForm({ ...editAgentForm, managerId: v })}>
-            <SelectTrigger className={isMobile ? 'h-11' : ''}>
-              <SelectValue placeholder="Seleccionar administrador" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">Sin administrador</SelectItem>
-              {admins.map((a) => (
-                <SelectItem key={a.id} value={a.id}>{a.name} {a.lastName || ''}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-    </div>
-  )
-
-  // --- Create User Form Content ---
-  const createUserFormContent = (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Nombre *</Label><Input className={isMobile ? 'h-11' : ''} value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} placeholder="Nombre" /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Apellidos</Label><Input className={isMobile ? 'h-11' : ''} value={createForm.lastName} onChange={(e) => setCreateForm({ ...createForm, lastName: e.target.value })} placeholder="Apellidos" /></div>
-      </div>
-      <div className="space-y-1.5"><Label className="text-sm">Email *</Label><Input className={isMobile ? 'h-11' : ''} type="email" value={createForm.email} onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })} placeholder="email@ejemplo.com" /></div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-sm">Contraseña temporal *</Label>
-          <div className="relative">
-            <Input className={isMobile ? 'h-11 pr-10' : 'pr-10'} type={showPassword ? 'text' : 'password'} value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} placeholder="Mínimo 8 caracteres" />
-            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" onClick={() => setShowPassword(!showPassword)}><Eye className="h-4 w-4" /></button>
-          </div>
-        </div>
-        <div className="space-y-1.5"><Label className="text-sm">Confirmar contraseña *</Label><Input className={isMobile ? 'h-11' : ''} type={showPassword ? 'text' : 'password'} value={createForm.confirmPassword} onChange={(e) => setCreateForm({ ...createForm, confirmPassword: e.target.value })} placeholder="Repetir contraseña" /></div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Teléfono</Label><Input className={isMobile ? 'h-11' : ''} value={createForm.phone} onChange={(e) => setCreateForm({ ...createForm, phone: e.target.value })} placeholder="+34 600 000 000" /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Cargo</Label><Input className={isMobile ? 'h-11' : ''} value={createForm.position} onChange={(e) => setCreateForm({ ...createForm, position: e.target.value })} placeholder="Ej: Agente de seguros" /></div>
-      </div>
-      <DocumentTypeSelector value={createForm.documentType} onChange={(v) => setCreateForm({ ...createForm, documentType: v })} documentNumber={createForm.documentNumber} onDocumentNumberChange={(v) => setCreateForm({ ...createForm, documentNumber: v })} isMobile={isMobile} />
-      <div className="space-y-1.5"><Label className="text-sm">Oficina/Zona</Label><Input className={isMobile ? 'h-11' : ''} value={createForm.office} onChange={(e) => setCreateForm({ ...createForm, office: e.target.value })} placeholder="Ej: Oficina Madrid" /></div>
-      <div className="space-y-2">
-        <Label className="text-sm font-medium">Rol *</Label>
-        <RoleSelectorCards selectedRoleId={createForm.roleId} onSelectRoleId={(roleId) => setCreateForm({ ...createForm, roleId })} availableRoleNames={assignableRoles} allRoleNames={allRoleKeys} roles={roles} />
-      </div>
-    </div>
-  )
-
-  // --- Edit User Form Content ---
-  const editUserFormContent = (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Nombre *</Label><Input className={isMobile ? 'h-11' : ''} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Apellidos</Label><Input className={isMobile ? 'h-11' : ''} value={editForm.lastName} onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })} /></div>
-      </div>
-      <div className="space-y-1.5"><Label className="text-sm">Email *</Label><Input className={isMobile ? 'h-11' : ''} type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} /></div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-sm">Nueva contraseña (opcional)</Label>
-          <div className="relative">
-            <Input className={isMobile ? 'h-11 pr-10' : 'pr-10'} type={showEditPassword ? 'text' : 'password'} value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Dejar vacío para no cambiar" />
-            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" onClick={() => setShowEditPassword(!showEditPassword)}><Eye className="h-4 w-4" /></button>
-          </div>
-        </div>
-        <div className="space-y-1.5"><Label className="text-sm">Confirmar contraseña</Label><Input className={isMobile ? 'h-11' : ''} type={showEditPassword ? 'text' : 'password'} value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} placeholder="Repetir" disabled={!editForm.password} /></div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5"><Label className="text-sm">Teléfono</Label><Input className={isMobile ? 'h-11' : ''} value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} /></div>
-        <div className="space-y-1.5"><Label className="text-sm">Cargo</Label><Input className={isMobile ? 'h-11' : ''} value={editForm.position} onChange={(e) => setEditForm({ ...editForm, position: e.target.value })} /></div>
-      </div>
-      <DocumentTypeSelector value={editForm.documentType} onChange={(v) => setEditForm({ ...editForm, documentType: v })} documentNumber={editForm.documentNumber} onDocumentNumberChange={(v) => setEditForm({ ...editForm, documentNumber: v })} isMobile={isMobile} />
-      <div className="space-y-1.5"><Label className="text-sm">Oficina/Zona</Label><Input className={isMobile ? 'h-11' : ''} value={editForm.office} onChange={(e) => setEditForm({ ...editForm, office: e.target.value })} /></div>
-      {editingUser && (
-        <div className="p-3 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-500 mb-1">Rol actual</p>
-          <div className="flex items-center gap-2">
-            {getRoleBadge(editingUser.role?.name || '')}
-            <span className="text-xs text-gray-400">Usa "Cambiar rol" para modificar</span>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-
-  // --- Reset Password Dialog ---
-  const resetPasswordContent = (
-    <div className="space-y-4">
-      {resetPasswordUser && (
-        <div className="p-3 bg-gray-50 rounded-lg">
-          <p className="text-sm font-medium">{resetPasswordUser.name} {resetPasswordUser.lastName || ''}</p>
-          <p className="text-xs text-gray-500">{resetPasswordUser.email}</p>
-        </div>
-      )}
+      <p className="text-sm text-muted-foreground">
+        Restablecer contraseña de <strong>{resetPasswordForm.userName}</strong>
+      </p>
       <div className="space-y-1.5">
         <Label className="text-sm">Nueva contraseña *</Label>
-        <div className="relative">
-          <Input className={isMobile ? 'h-11 pr-10' : 'pr-10'} type={showNewPassword ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" />
-          <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" onClick={() => setShowNewPassword(!showNewPassword)}><Eye className="h-4 w-4" /></button>
-        </div>
+        <PasswordInput
+          value={resetPasswordForm.newPassword}
+          onChange={(v) => setResetPasswordForm({ ...resetPasswordForm, newPassword: v })}
+          placeholder="Mínimo 8 caracteres"
+        />
       </div>
       <div className="space-y-1.5">
         <Label className="text-sm">Confirmar contraseña *</Label>
-        <Input className={isMobile ? 'h-11' : ''} type={showNewPassword ? 'text' : 'password'} value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} placeholder="Repetir contraseña" />
+        <Input
+          className={isMobile ? 'h-11' : ''}
+          type={showPassword ? 'text' : 'password'}
+          value={resetPasswordForm.confirmPassword}
+          onChange={(e) => setResetPasswordForm({ ...resetPasswordForm, confirmPassword: e.target.value })}
+          placeholder="Repetir contraseña"
+        />
       </div>
     </div>
   )
 
-  // --- Agent Ficha Sheet ---
-  const fichaContent = fichaAgent && (
-    <div className="space-y-4">
-      <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-full bg-teal-100 flex items-center justify-center">
-          <Briefcase className="h-6 w-6 text-teal-600" />
-        </div>
-        <div>
-          <p className="font-semibold">{fichaAgent.name} {fichaAgent.lastName || ''}</p>
-          <p className="text-sm text-gray-500">{fichaAgent.email}</p>
-          <div className="flex gap-2 mt-1">
-            {getStatusBadge(fichaAgent.isActive)}
-            {getRoleBadge('corredor')}
-          </div>
-        </div>
-      </div>
-      <Separator />
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-        <div><span className="text-gray-500 text-xs">Teléfono</span><p>{fichaAgent.phone || '—'}</p></div>
-        <div><span className="text-gray-500 text-xs">DNI/NIE</span><p>{fichaAgent.documentNumber || '—'}</p></div>
-        <div><span className="text-gray-500 text-xs">Cargo</span><p>{fichaAgent.position || '—'}</p></div>
-        <div><span className="text-gray-500 text-xs">Oficina</span><p>{fichaAgent.office || '—'}</p></div>
-        <div><span className="text-gray-500 text-xs">Último acceso</span><p>{fichaAgent.lastLogin ? format(new Date(fichaAgent.lastLogin), 'dd/MM/yy HH:mm') : 'Nunca'}</p></div>
-        {fichaAgent.manager && <div><span className="text-gray-500 text-xs">Admin responsable</span><p>{fichaAgent.manager.name} {fichaAgent.manager.lastName}</p></div>}
-      </div>
-      <Separator />
-      <div className="grid grid-cols-3 gap-3">
-        <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-teal-600">{fichaAgent._count?.assignedClients ?? 0}</p><p className="text-[10px] text-gray-500">Clientes</p></CardContent></Card>
-        <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-purple-600">{fichaAgent._count?.ownedPolicies ?? 0}</p><p className="text-[10px] text-gray-500">Pólizas</p></CardContent></Card>
-        <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-amber-600">{fichaAgent._count?.assignedLeads ?? 0}</p><p className="text-[10px] text-gray-500">Leads</p></CardContent></Card>
-      </div>
-      <Separator />
-      {fichaLoading ? (
-        <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
-      ) : (
-        <>
-          <div>
-            <p className="text-sm font-medium mb-2">Clientes ({fichaClients.length})</p>
-            {fichaClients.length === 0 ? (
-              <p className="text-xs text-gray-400 italic">Sin clientes asignados</p>
-            ) : (
-              <div className="max-h-40 overflow-y-auto space-y-1">
-                {fichaClients.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between p-2 bg-gray-50 rounded text-xs">
-                    <span>{c.name} {c.lastName}</span>
-                    <Badge variant="outline" className="text-[9px]">{c.status}</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div>
-            <p className="text-sm font-medium mb-2">Pólizas ({fichaPolicies.length})</p>
-            {fichaPolicies.length === 0 ? (
-              <p className="text-xs text-gray-400 italic">Sin pólizas</p>
-            ) : (
-              <div className="max-h-40 overflow-y-auto space-y-1">
-                {fichaPolicies.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between p-2 bg-gray-50 rounded text-xs">
-                    <span>{p.policyNumber} - {p.productName}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{p.premium.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}</span>
-                      <Badge variant="outline" className="text-[9px]">{p.status}</Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  )
+  // ============================================================
+  // PORTFOLIO VIEW (Ficha de Corredor)
+  // ============================================================
+  const PortfolioContent = () => {
+    const [portfolioTab, setPortfolioTab] = useState('clients')
 
-  // Render Dialog or Sheet based on mobile
-  const renderModal = (open: boolean, onOpenChange: (v: boolean) => void, title: string, content: React.ReactNode, footer: React.ReactNode) => {
-    if (isMobile) {
+    if (portfolioLoading) {
       return (
-        <Sheet open={open} onOpenChange={onOpenChange}>
-          <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-            <SheetHeader><SheetTitle>{title}</SheetTitle></SheetHeader>
-            <div className="py-4">{content}</div>
-            <SheetFooter>{footer}</SheetFooter>
-          </SheetContent>
-        </Sheet>
+        <div className="space-y-4 p-4">
+          <Skeleton className="h-8 w-48" />
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-20" />
+            ))}
+          </div>
+          <Skeleton className="h-40" />
+        </div>
       )
     }
+
+    if (!portfolioData) {
+      return <div className="p-4 text-center text-muted-foreground">No se pudo cargar la cartera</div>
+    }
+
+    const { agent, clients, policies, appointments, stats } = portfolioData
+
     return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
-          <div className="py-4">{content}</div>
-          <DialogFooter>{footer}</DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <div className="space-y-4">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold">{formatName(agent.name, agent.lastName)}</h3>
+              {getStatusBadge(agent.isActive)}
+            </div>
+            <p className="text-sm text-muted-foreground">{agent.email}</p>
+            {agent.phone && <p className="text-sm text-muted-foreground">{agent.phone}</p>}
+            {agent.office && (
+              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                <Building2 className="h-3.5 w-3.5" />
+                {agent.office}
+              </div>
+            )}
+            {agent.manager && (
+              <p className="text-sm text-muted-foreground mt-1">
+                Admin: {formatName(agent.manager.name, agent.manager.lastName)}
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="sm" onClick={() => { setPortfolioOpen(false); setTimeout(() => handleOpenEditAgent(agents.find(a => a.id === agent.id)!), 200) }}>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Editar</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="sm" onClick={() => { setPortfolioOpen(false); setTimeout(() => handleOpenResetPassword(agent.id, formatName(agent.name, agent.lastName)), 200) }}>
+                    <KeyRound className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Resetear contraseña</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={agent.isActive ? 'destructive' : 'default'}
+                    size="sm"
+                    onClick={() => {
+                      const agentObj = agents.find(a => a.id === agent.id)
+                      if (agentObj) {
+                        setPortfolioOpen(false)
+                        setTimeout(() => handleToggleAgentStatus(agentObj), 200)
+                      }
+                    }}
+                  >
+                    {agent.isActive ? 'Desactivar' : 'Activar'}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{agent.isActive ? 'Desactivar' : 'Activar'} cuenta</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Card className="border-0 bg-emerald-50 dark:bg-emerald-950/30">
+            <CardContent className="p-3 text-center">
+              <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{stats.totalClients}</p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">Clientes</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 bg-teal-50 dark:bg-teal-950/30">
+            <CardContent className="p-3 text-center">
+              <p className="text-2xl font-bold text-teal-700 dark:text-teal-400">{stats.activePolicies}</p>
+              <p className="text-xs text-teal-600 dark:text-teal-400">Pólizas Activas</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 bg-blue-50 dark:bg-blue-950/30">
+            <CardContent className="p-3 text-center">
+              <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">{stats.totalAppointments}</p>
+              <p className="text-xs text-blue-600 dark:text-blue-400">Citas</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 bg-amber-50 dark:bg-amber-950/30">
+            <CardContent className="p-3 text-center">
+              <p className="text-2xl font-bold text-amber-700 dark:text-amber-400">{formatCurrency(stats.totalPremium)}</p>
+              <p className="text-xs text-amber-600 dark:text-amber-400">Prima Total</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Sub-tabs */}
+        <Tabs value={portfolioTab} onValueChange={setPortfolioTab}>
+          <TabsList className="w-full">
+            <TabsTrigger value="clients" className="flex-1">
+              <Users className="h-4 w-4 mr-1" /> Clientes
+            </TabsTrigger>
+            <TabsTrigger value="policies" className="flex-1">
+              <FileText className="h-4 w-4 mr-1" /> Pólizas
+            </TabsTrigger>
+            <TabsTrigger value="appointments" className="flex-1">
+              <Calendar className="h-4 w-4 mr-1" /> Citas
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="clients" className="mt-3">
+            {clients.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-8">No hay clientes asignados</p>
+            ) : isMobile ? (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {clients.map((c) => (
+                  <Card key={c.id} className="p-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-medium text-sm">{formatName(c.name, c.lastName)}</p>
+                        <p className="text-xs text-muted-foreground">{c.email}</p>
+                        {c.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
+                      </div>
+                      <Badge className={c.status === 'active' ? 'bg-emerald-100 text-emerald-700 border-0 text-[10px]' : 'bg-gray-100 text-gray-600 border-0 text-[10px]'}>
+                        {c.status}
+                      </Badge>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Teléfono</TableHead>
+                      <TableHead>Estado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {clients.map((c) => (
+                      <TableRow key={c.id}>
+                        <TableCell className="font-medium text-sm">{formatName(c.name, c.lastName)}</TableCell>
+                        <TableCell className="text-sm">{c.email}</TableCell>
+                        <TableCell className="text-sm">{c.phone || '—'}</TableCell>
+                        <TableCell>
+                          <Badge className={c.status === 'active' ? 'bg-emerald-100 text-emerald-700 border-0 text-[10px]' : 'bg-gray-100 text-gray-600 border-0 text-[10px]'}>
+                            {c.status}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="policies" className="mt-3">
+            {policies.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-8">No hay pólizas</p>
+            ) : isMobile ? (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {policies.map((p) => (
+                  <Card key={p.id} className="p-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-medium text-sm">{p.policyNumber}</p>
+                        <p className="text-xs text-muted-foreground">{p.productName}</p>
+                        <p className="text-xs text-muted-foreground">{formatName(p.client.name, p.client.lastName)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold">{formatCurrency(p.premium)}</p>
+                        <Badge className={p.status === 'active' ? 'bg-emerald-100 text-emerald-700 border-0 text-[10px]' : 'bg-gray-100 text-gray-600 border-0 text-[10px]'}>
+                          {p.status}
+                        </Badge>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nº Póliza</TableHead>
+                      <TableHead>Producto</TableHead>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="text-right">Prima</TableHead>
+                      <TableHead>Inicio</TableHead>
+                      <TableHead>Fin</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {policies.map((p) => (
+                      <TableRow key={p.id}>
+                        <TableCell className="font-medium text-sm">{p.policyNumber}</TableCell>
+                        <TableCell className="text-sm">{p.productName}</TableCell>
+                        <TableCell className="text-sm">{formatName(p.client.name, p.client.lastName)}</TableCell>
+                        <TableCell>
+                          <Badge className={p.status === 'active' ? 'bg-emerald-100 text-emerald-700 border-0 text-[10px]' : 'bg-gray-100 text-gray-600 border-0 text-[10px]'}>
+                            {p.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right text-sm">{formatCurrency(p.premium)}</TableCell>
+                        <TableCell className="text-sm">{new Date(p.startDate).toLocaleDateString('es-ES')}</TableCell>
+                        <TableCell className="text-sm">{new Date(p.endDate).toLocaleDateString('es-ES')}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="appointments" className="mt-3">
+            {appointments.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-8">No hay citas</p>
+            ) : isMobile ? (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {appointments.map((a) => (
+                  <Card key={a.id} className="p-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-medium text-sm">{a.title}</p>
+                        <p className="text-xs text-muted-foreground">{a.type} · {new Date(a.date).toLocaleDateString('es-ES')}</p>
+                        {a.client && <p className="text-xs text-muted-foreground">{formatName(a.client.name, a.client.lastName)}</p>}
+                      </div>
+                      <Badge className={a.status === 'scheduled' ? 'bg-blue-100 text-blue-700 border-0 text-[10px]' : a.status === 'completed' ? 'bg-emerald-100 text-emerald-700 border-0 text-[10px]' : 'bg-gray-100 text-gray-600 border-0 text-[10px]'}>
+                        {a.status}
+                      </Badge>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Título</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead>Fecha</TableHead>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Estado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {appointments.map((a) => (
+                      <TableRow key={a.id}>
+                        <TableCell className="font-medium text-sm">{a.title}</TableCell>
+                        <TableCell className="text-sm">{a.type}</TableCell>
+                        <TableCell className="text-sm">{new Date(a.date).toLocaleDateString('es-ES')}</TableCell>
+                        <TableCell className="text-sm">{a.client ? formatName(a.client.name, a.client.lastName) : '—'}</TableCell>
+                        <TableCell>
+                          <Badge className={a.status === 'scheduled' ? 'bg-blue-100 text-blue-700 border-0 text-[10px]' : a.status === 'completed' ? 'bg-emerald-100 text-emerald-700 border-0 text-[10px]' : 'bg-gray-100 text-gray-600 border-0 text-[10px]'}>
+                            {a.status}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
     )
   }
 
   // ============================================================
-  // TAB LIST
+  // RESUMEN TAB
   // ============================================================
-  const visibleTabs: { value: string; label: string; icon: React.ElementType }[] = [
-    { value: 'resumen', label: 'Resumen', icon: BarChart3 },
-    ...(isSuperAdmin ? [{ value: 'administradores', label: 'Admins', icon: ShieldCheck }] : []),
-    { value: 'corredores', label: 'Corredores', icon: Briefcase },
-    ...(isSuperAdmin ? [{ value: 'usuarios', label: 'Usuarios', icon: Users }] : []),
-    ...(isSuperAdmin ? [{ value: 'roles', label: 'Roles', icon: Lock }] : []),
-    { value: 'auditoria', label: 'Auditoría', icon: ClipboardList },
-  ]
+  const OverviewTab = () => {
+    if (loadingSummary) {
+      return (
+        <div className="space-y-6">
+          <div className={`grid gap-4 ${isMobile ? 'grid-cols-2' : 'grid-cols-5'}`}>
+            {Array.from({ length: isSuperAdmin ? 5 : 4 }).map((_, i) => (
+              <KpiSkeleton key={i} />
+            ))}
+          </div>
+          <TableSkeleton />
+        </div>
+      )
+    }
+
+    if (!summary) {
+      return <p className="text-center text-muted-foreground py-8">No se pudo cargar el resumen</p>
+    }
+
+    const { kpis } = summary
+
+    // ---- SUPER ADMIN VIEW ----
+    if (isSuperAdmin) {
+      return (
+        <div className="space-y-6">
+          {/* KPI Cards */}
+          <div className={`grid gap-4 ${isMobile ? 'grid-cols-2' : 'grid-cols-5'}`}>
+            <Card className="border-0 bg-emerald-50 dark:bg-emerald-950/30">
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <Shield className="h-4 w-4 text-emerald-600" />
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Administradores</p>
+                </div>
+                <p className="text-2xl sm:text-3xl font-bold text-emerald-700 dark:text-emerald-400">{kpis.totalAdmins ?? 0}</p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 bg-teal-50 dark:bg-teal-950/30">
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <UserCheck className="h-4 w-4 text-teal-600" />
+                  <p className="text-xs text-teal-600 dark:text-teal-400 font-medium">Corredores</p>
+                </div>
+                <p className="text-2xl sm:text-3xl font-bold text-teal-700 dark:text-teal-400">{kpis.totalCorredores}</p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 bg-blue-50 dark:bg-blue-950/30">
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <Users className="h-4 w-4 text-blue-600" />
+                  <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">Clientes</p>
+                </div>
+                <p className="text-2xl sm:text-3xl font-bold text-blue-700 dark:text-blue-400">{kpis.totalClients}</p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 bg-violet-50 dark:bg-violet-950/30">
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <FileText className="h-4 w-4 text-violet-600" />
+                  <p className="text-xs text-violet-600 dark:text-violet-400 font-medium">Pólizas Activas</p>
+                </div>
+                <p className="text-2xl sm:text-3xl font-bold text-violet-700 dark:text-violet-400">{kpis.totalPolicies}</p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 bg-amber-50 dark:bg-amber-950/30">
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <DollarSign className="h-4 w-4 text-amber-600" />
+                  <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">Prima Total</p>
+                </div>
+                <p className="text-xl sm:text-2xl font-bold text-amber-700 dark:text-amber-400">{formatCurrency(kpis.totalPremium)}</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Admins Table */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <Shield className="h-5 w-5 text-emerald-600" />
+                Administradores de Grupo
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!summary.admins || summary.admins.length === 0 ? (
+                <p className="text-center text-sm text-muted-foreground py-8">No hay administradores registrados</p>
+              ) : isMobile ? (
+                <div className="space-y-3">
+                  {summary.admins.map((admin) => (
+                    <Card key={admin.id} className="p-3 border shadow-sm">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <p className="font-medium text-sm">{formatName(admin.name, admin.lastName)}</p>
+                          <p className="text-xs text-muted-foreground">{admin.email}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {getStatusBadge(admin.isActive)}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2 text-center mb-3">
+                        <div>
+                          <p className="text-sm font-semibold">{admin.corredoresCount}</p>
+                          <p className="text-[10px] text-muted-foreground">Corred.</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold">{admin.clientsCount}</p>
+                          <p className="text-[10px] text-muted-foreground">Clientes</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold">{admin.policiesCount}</p>
+                          <p className="text-[10px] text-muted-foreground">Pólizas</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold">{formatCurrency(admin.premium)}</p>
+                          <p className="text-[10px] text-muted-foreground">Prima</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={() => handleViewAdminCorredores(admin.id)}>
+                          <Eye className="h-3.5 w-3.5 mr-1" /> Corredores
+                        </Button>
+                        <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={() => {
+                          const adminWithStats = admins.find(a => a.id === admin.id)
+                          if (adminWithStats) handleOpenEditAdmin(adminWithStats)
+                          else toast.info('Ve a la pestaña Administradores para editar')
+                        }}>
+                          <Pencil className="h-3.5 w-3.5 mr-1" /> Editar
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead className="text-center">Corredores</TableHead>
+                        <TableHead className="text-center">Clientes</TableHead>
+                        <TableHead className="text-center">Pólizas</TableHead>
+                        <TableHead className="text-right">Prima Total</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {summary.admins.map((admin) => (
+                        <TableRow key={admin.id}>
+                          <TableCell className="font-medium text-sm">{formatName(admin.name, admin.lastName)}</TableCell>
+                          <TableCell className="text-sm">{admin.email}</TableCell>
+                          <TableCell>{getStatusBadge(admin.isActive)}</TableCell>
+                          <TableCell className="text-center text-sm">{admin.corredoresCount}</TableCell>
+                          <TableCell className="text-center text-sm">{admin.clientsCount}</TableCell>
+                          <TableCell className="text-center text-sm">{admin.policiesCount}</TableCell>
+                          <TableCell className="text-right text-sm font-medium">{formatCurrency(admin.premium)}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button variant="ghost" size="sm" onClick={() => handleViewAdminCorredores(admin.id)}>
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Ver corredores</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button variant="ghost" size="sm" onClick={() => {
+                                      const adminWithStats = admins.find(a => a.id === admin.id)
+                                      if (adminWithStats) handleOpenEditAdmin(adminWithStats)
+                                      else toast.info('Ve a la pestaña Administradores para editar')
+                                    }}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Editar</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )
+    }
+
+    // ---- ADMINISTRADOR VIEW ----
+    return (
+      <div className="space-y-6">
+        {/* KPI Cards */}
+        <div className={`grid gap-4 ${isMobile ? 'grid-cols-2' : 'grid-cols-4'}`}>
+          <Card className="border-0 bg-teal-50 dark:bg-teal-950/30">
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-1">
+                <UserCheck className="h-4 w-4 text-teal-600" />
+                <p className="text-xs text-teal-600 dark:text-teal-400 font-medium">Mis Corredores</p>
+              </div>
+              <p className="text-2xl sm:text-3xl font-bold text-teal-700 dark:text-teal-400">{kpis.totalCorredores}</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 bg-blue-50 dark:bg-blue-950/30">
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-1">
+                <Users className="h-4 w-4 text-blue-600" />
+                <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">Mis Clientes</p>
+              </div>
+              <p className="text-2xl sm:text-3xl font-bold text-blue-700 dark:text-blue-400">{kpis.totalClients}</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 bg-violet-50 dark:bg-violet-950/30">
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-1">
+                <FileText className="h-4 w-4 text-violet-600" />
+                <p className="text-xs text-violet-600 dark:text-violet-400 font-medium">Mis Pólizas</p>
+              </div>
+              <p className="text-2xl sm:text-3xl font-bold text-violet-700 dark:text-violet-400">{kpis.totalPolicies}</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 bg-amber-50 dark:bg-amber-950/30">
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-1">
+                <DollarSign className="h-4 w-4 text-amber-600" />
+                <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">Prima Total</p>
+              </div>
+              <p className="text-xl sm:text-2xl font-bold text-amber-700 dark:text-amber-400">{formatCurrency(kpis.totalPremium)}</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Agents Table */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <UserCheck className="h-5 w-5 text-teal-600" />
+              Mis Corredores
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!summary.agents || summary.agents.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-8">No hay corredores asignados</p>
+            ) : isMobile ? (
+              <div className="space-y-3">
+                {summary.agents.map((agent) => (
+                  <Card key={agent.id} className="p-3 border shadow-sm">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <p className="font-medium text-sm">{formatName(agent.name, agent.lastName)}</p>
+                        <p className="text-xs text-muted-foreground">{agent.email}</p>
+                      </div>
+                      {getStatusBadge(agent.isActive)}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                      <div>
+                        <p className="text-sm font-semibold">{agent.clientsCount}</p>
+                        <p className="text-[10px] text-muted-foreground">Clientes</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold">{agent.policiesCount}</p>
+                        <p className="text-[10px] text-muted-foreground">Pólizas</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold">{formatCurrency(agent.premium)}</p>
+                        <p className="text-[10px] text-muted-foreground">Prima</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={() => handleOpenPortfolio(agent.id)}>
+                        <Eye className="h-3.5 w-3.5 mr-1" /> Cartera
+                      </Button>
+                      <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={() => {
+                        const agentObj = agents.find(a => a.id === agent.id)
+                        if (agentObj) handleOpenEditAgent(agentObj)
+                      }}>
+                        <Pencil className="h-3.5 w-3.5 mr-1" /> Editar
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="text-center">Clientes</TableHead>
+                      <TableHead className="text-center">Pólizas</TableHead>
+                      <TableHead className="text-right">Prima</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {summary.agents.map((agent) => (
+                      <TableRow key={agent.id}>
+                        <TableCell className="font-medium text-sm">{formatName(agent.name, agent.lastName)}</TableCell>
+                        <TableCell className="text-sm">{agent.email}</TableCell>
+                        <TableCell>{getStatusBadge(agent.isActive)}</TableCell>
+                        <TableCell className="text-center text-sm">{agent.clientsCount}</TableCell>
+                        <TableCell className="text-center text-sm">{agent.policiesCount}</TableCell>
+                        <TableCell className="text-right text-sm font-medium">{formatCurrency(agent.premium)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="sm" onClick={() => handleOpenPortfolio(agent.id)}>
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Ver cartera</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="sm" onClick={() => {
+                                    const agentObj = agents.find(a => a.id === agent.id)
+                                    if (agentObj) handleOpenEditAgent(agentObj)
+                                  }}>
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Editar</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="sm" onClick={() => {
+                                    const agentObj = agents.find(a => a.id === agent.id)
+                                    if (agentObj) handleToggleAgentStatus(agentObj)
+                                  }}>
+                                    {agent.isActive ? <X className="h-4 w-4 text-red-500" /> : <Check className="h-4 w-4 text-emerald-500" />}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>{agent.isActive ? 'Desactivar' : 'Activar'}</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ============================================================
+  // ADMINISTRADORES TAB (super_admin ONLY)
+  // ============================================================
+  const AdminsTab = () => {
+    if (!isSuperAdmin) return null
+
+    return (
+      <div className="space-y-4">
+        {/* Search & Filters */}
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+          <div className="relative flex-1 w-full">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              className={isMobile ? 'h-11 pl-9' : 'pl-9'}
+              placeholder="Buscar administradores..."
+              value={adminsSearch}
+              onChange={(e) => { setAdminsSearch(e.target.value); setAdminsPage(1) }}
+            />
+          </div>
+          <Select value={adminsStatusFilter} onValueChange={(v) => { setAdminsStatusFilter(v); setAdminsPage(1) }}>
+            <SelectTrigger className={isMobile ? 'h-11 w-full' : 'w-40'}>
+              <SelectValue placeholder="Estado" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="true">Activos</SelectItem>
+              <SelectItem value="false">Inactivos</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button className={isMobile ? 'w-full h-11' : ''} onClick={() => setCreateAdminOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" /> Nuevo Administrador
+          </Button>
+        </div>
+
+        {/* Table */}
+        {loadingAdmins ? (
+          <TableSkeleton />
+        ) : admins.length === 0 ? (
+          <Card className="py-12">
+            <p className="text-center text-muted-foreground">
+              {adminsSearch ? 'No se encontraron administradores' : 'No hay administradores registrados'}
+            </p>
+          </Card>
+        ) : isMobile ? (
+          <div className="space-y-3">
+            {admins.map((admin) => (
+              <Card key={admin.id} className="p-3 border shadow-sm">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <p className="font-medium text-sm">{formatName(admin.name, admin.lastName)}</p>
+                    <p className="text-xs text-muted-foreground">{admin.email}</p>
+                    {admin.office && (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Building2 className="h-3 w-3" /> {admin.office}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {getRoleBadge(admin.role?.name || 'administrador')}
+                    {getStatusBadge(admin.isActive)}
+                  </div>
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-center mb-3">
+                  <div>
+                    <p className="text-sm font-semibold">{admin.stats.corredoresCount}</p>
+                    <p className="text-[10px] text-muted-foreground">Corred.</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">{admin.stats.clientsCount}</p>
+                    <p className="text-[10px] text-muted-foreground">Clientes</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">{admin.stats.policiesCount}</p>
+                    <p className="text-[10px] text-muted-foreground">Pólizas</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold">{formatCurrency(admin.stats.premium)}</p>
+                    <p className="text-[10px] text-muted-foreground">Prima</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => handleViewAdminCorredores(admin.id)}>
+                    <Eye className="h-3.5 w-3.5 mr-1" /> Corredores
+                  </Button>
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => handleOpenEditAdmin(admin)}>
+                    <Pencil className="h-3.5 w-3.5 mr-1" /> Editar
+                  </Button>
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => handleToggleAdminStatus(admin)}>
+                    {admin.isActive ? <X className="h-3.5 w-3.5 mr-1 text-red-500" /> : <Check className="h-3.5 w-3.5 mr-1 text-emerald-500" />}
+                    {admin.isActive ? 'Desactivar' : 'Activar'}
+                  </Button>
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => handleOpenResetPassword(admin.id, formatName(admin.name, admin.lastName))}>
+                    <KeyRound className="h-3.5 w-3.5 mr-1" /> Contraseña
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Card>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nombre</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead className="text-center">Corredores</TableHead>
+                    <TableHead className="text-center">Clientes</TableHead>
+                    <TableHead className="text-center">Pólizas</TableHead>
+                    <TableHead className="text-right">Prima</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {admins.map((admin) => (
+                    <TableRow key={admin.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium text-sm">{formatName(admin.name, admin.lastName)}</p>
+                          {admin.office && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Building2 className="h-3 w-3" /> {admin.office}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm">{admin.email}</TableCell>
+                      <TableCell>{getStatusBadge(admin.isActive)}</TableCell>
+                      <TableCell className="text-center text-sm">{admin.stats.corredoresCount}</TableCell>
+                      <TableCell className="text-center text-sm">{admin.stats.clientsCount}</TableCell>
+                      <TableCell className="text-center text-sm">{admin.stats.policiesCount}</TableCell>
+                      <TableCell className="text-right text-sm font-medium">{formatCurrency(admin.stats.premium)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="sm" onClick={() => handleViewAdminCorredores(admin.id)}>
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Ver corredores</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="sm" onClick={() => handleOpenEditAdmin(admin)}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Editar</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="sm" onClick={() => handleToggleAdminStatus(admin)}>
+                                  {admin.isActive ? <X className="h-4 w-4 text-red-500" /> : <Check className="h-4 w-4 text-emerald-500" />}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{admin.isActive ? 'Desactivar' : 'Activar'}</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="sm" onClick={() => handleOpenResetPassword(admin.id, formatName(admin.name, admin.lastName))}>
+                                  <KeyRound className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Resetear contraseña</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        )}
+
+        {/* Pagination */}
+        {totalAdmins > 20 && (
+          <div className="flex items-center justify-center gap-2">
+            <Button variant="outline" size="sm" disabled={adminsPage <= 1} onClick={() => setAdminsPage(p => p - 1)}>
+              Anterior
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Página {adminsPage} de {Math.ceil(totalAdmins / 20)}
+            </span>
+            <Button variant="outline" size="sm" disabled={adminsPage >= Math.ceil(totalAdmins / 20)} onClick={() => setAdminsPage(p => p + 1)}>
+              Siguiente
+            </Button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ============================================================
+  // CORREDORES TAB
+  // ============================================================
+  const AgentsTab = () => (
+    <div className="space-y-4">
+      {/* Search & Filters */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            className={isMobile ? 'h-11 pl-9' : 'pl-9'}
+            placeholder="Buscar corredores..."
+            value={agentsSearch}
+            onChange={(e) => { setAgentsSearch(e.target.value); setAgentsPage(1) }}
+          />
+        </div>
+        <Select value={agentsStatusFilter} onValueChange={(v) => { setAgentsStatusFilter(v); setAgentsPage(1) }}>
+          <SelectTrigger className={isMobile ? 'h-11 w-full' : 'w-40'}>
+            <SelectValue placeholder="Estado" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="true">Activos</SelectItem>
+            <SelectItem value="false">Inactivos</SelectItem>
+          </SelectContent>
+        </Select>
+        {isSuperAdmin && (
+          <Select value={agentsManagerFilter} onValueChange={(v) => { setAgentsManagerFilter(v); setAgentsPage(1) }}>
+            <SelectTrigger className={isMobile ? 'h-11 w-full' : 'w-52'}>
+              <SelectValue placeholder="Administrador" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los administradores</SelectItem>
+              {admins.map((admin) => (
+                <SelectItem key={admin.id} value={admin.id}>
+                  {formatName(admin.name, admin.lastName)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <Button className={isMobile ? 'w-full h-11' : ''} onClick={() => {
+          setAgentForm({
+            name: '', lastName: '', email: '', password: '', confirmPassword: '',
+            phone: '', managerId: '', isActive: true,
+          })
+          setShowPassword(false)
+          setCreateAgentOpen(true)
+        }}>
+          <UserPlus className="h-4 w-4 mr-2" /> Nuevo Corredor
+        </Button>
+      </div>
+
+      {/* Table */}
+      {loadingAgents ? (
+        <TableSkeleton />
+      ) : agents.length === 0 ? (
+        <Card className="py-12">
+          <p className="text-center text-muted-foreground">
+            {agentsSearch || agentsManagerFilter !== 'all' ? 'No se encontraron corredores con los filtros aplicados' : 'No hay corredores registrados'}
+          </p>
+        </Card>
+      ) : isMobile ? (
+        <div className="space-y-3">
+          {agents.map((agent) => (
+            <Card key={agent.id} className="p-3 border shadow-sm">
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  <p className="font-medium text-sm">{formatName(agent.name, agent.lastName)}</p>
+                  <p className="text-xs text-muted-foreground">{agent.email}</p>
+                  {agent.manager && (
+                    <p className="text-xs text-muted-foreground">
+                      Admin: {formatName(agent.manager.name, agent.manager.lastName)}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {getRoleBadge('corredor')}
+                  {getStatusBadge(agent.isActive)}
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-center mb-3">
+                <div>
+                  <p className="text-sm font-semibold">{agent._count.assignedClients}</p>
+                  <p className="text-[10px] text-muted-foreground">Clientes</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">{agent._count.ownedPolicies}</p>
+                  <p className="text-[10px] text-muted-foreground">Pólizas</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">{agent._count.assignedLeads}</p>
+                  <p className="text-[10px] text-muted-foreground">Leads</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">{agent._count.soldPolicies}</p>
+                  <p className="text-[10px] text-muted-foreground">Vendidas</p>
+                </div>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" size="sm" className="text-xs" onClick={() => handleOpenPortfolio(agent.id)}>
+                  <Eye className="h-3.5 w-3.5 mr-1" /> Cartera
+                </Button>
+                <Button variant="outline" size="sm" className="text-xs" onClick={() => handleOpenEditAgent(agent)}>
+                  <Pencil className="h-3.5 w-3.5 mr-1" /> Editar
+                </Button>
+                <Button variant="outline" size="sm" className="text-xs" onClick={() => handleToggleAgentStatus(agent)}>
+                  {agent.isActive ? <X className="h-3.5 w-3.5 mr-1 text-red-500" /> : <Check className="h-3.5 w-3.5 mr-1 text-emerald-500" />}
+                  {agent.isActive ? 'Desactivar' : 'Activar'}
+                </Button>
+                <Button variant="outline" size="sm" className="text-xs" onClick={() => handleOpenResetPassword(agent.id, formatName(agent.name, agent.lastName))}>
+                  <KeyRound className="h-3.5 w-3.5 mr-1" /> Contraseña
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Card>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>Email</TableHead>
+                  {isSuperAdmin && <TableHead>Administrador</TableHead>}
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="text-center">Clientes</TableHead>
+                  <TableHead className="text-center">Pólizas</TableHead>
+                  <TableHead className="text-center">Leads</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {agents.map((agent) => (
+                  <TableRow key={agent.id}>
+                    <TableCell>
+                      <div>
+                        <p className="font-medium text-sm">{formatName(agent.name, agent.lastName)}</p>
+                        {agent.phone && <p className="text-xs text-muted-foreground">{agent.phone}</p>}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm">{agent.email}</TableCell>
+                    {isSuperAdmin && (
+                      <TableCell className="text-sm">
+                        {agent.manager
+                          ? formatName(agent.manager.name, agent.manager.lastName)
+                          : '—'}
+                      </TableCell>
+                    )}
+                    <TableCell>{getStatusBadge(agent.isActive)}</TableCell>
+                    <TableCell className="text-center text-sm">{agent._count.assignedClients}</TableCell>
+                    <TableCell className="text-center text-sm">{agent._count.ownedPolicies}</TableCell>
+                    <TableCell className="text-center text-sm">{agent._count.assignedLeads}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="sm" onClick={() => handleOpenPortfolio(agent.id)}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Ver cartera</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="sm" onClick={() => handleOpenEditAgent(agent)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Editar</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="sm" onClick={() => handleToggleAgentStatus(agent)}>
+                                {agent.isActive ? <X className="h-4 w-4 text-red-500" /> : <Check className="h-4 w-4 text-emerald-500" />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{agent.isActive ? 'Desactivar' : 'Activar'}</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="sm" onClick={() => handleOpenResetPassword(agent.id, formatName(agent.name, agent.lastName))}>
+                                <KeyRound className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Resetear contraseña</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
+      )}
+
+      {/* Pagination */}
+      {totalAgents > 20 && (
+        <div className="flex items-center justify-center gap-2">
+          <Button variant="outline" size="sm" disabled={agentsPage <= 1} onClick={() => setAgentsPage(p => p - 1)}>
+            Anterior
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Página {agentsPage} de {Math.ceil(totalAgents / 20)}
+          </span>
+          <Button variant="outline" size="sm" disabled={agentsPage >= Math.ceil(totalAgents / 20)} onClick={() => setAgentsPage(p => p + 1)}>
+            Siguiente
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+
+  // ============================================================
+  // CONFIGURACIÓN TAB
+  // ============================================================
+  const ConfigTab = () => (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Información del sistema</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Tu rol</p>
+              <div className="mt-1">{getRoleBadge(currentUser?.role || '')}</div>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Email</p>
+              <p className="text-sm font-medium mt-1">{currentUser?.email}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Preferencias</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Las preferencias de configuración se gestionan desde la sección de Ajustes del perfil.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  )
 
   // ============================================================
   // RENDER
   // ============================================================
+  const availableTabs = isSuperAdmin
+    ? [
+        { key: 'overview', label: 'Resumen', icon: TrendingUp },
+        { key: 'admins', label: 'Administradores', icon: Shield },
+        { key: 'agents', label: 'Corredores', icon: UserCheck },
+        { key: 'config', label: 'Configuración', icon: Settings },
+      ]
+    : [
+        { key: 'overview', label: 'Resumen', icon: TrendingUp },
+        { key: 'agents', label: 'Corredores', icon: UserCheck },
+        { key: 'config', label: 'Configuración', icon: Settings },
+      ]
+
   return (
-    <div className="space-y-4 p-4 md:p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Panel de Administración</h1>
-        <Button variant="outline" size="sm" onClick={refreshAll}>
-          <RefreshCw className="h-4 w-4 mr-1" />
-          Actualizar
-        </Button>
+    <div className="space-y-6">
+      {/* Page Header */}
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Panel de Administración</h1>
+        <p className="text-muted-foreground">
+          {isSuperAdmin
+            ? 'Gestiona administradores, corredores y la estructura jerárquica'
+            : 'Gestiona tus corredores y supervisa su rendimiento'}
+        </p>
       </div>
 
+      {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="w-full flex overflow-x-auto">
-          {visibleTabs.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5 text-xs sm:text-sm">
-              <tab.icon className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{tab.label}</span>
+        <TabsList className={isMobile ? 'w-full grid' : ''} style={isMobile ? { gridTemplateColumns: `repeat(${availableTabs.length}, 1fr)` } : undefined}>
+          {availableTabs.map((tab) => (
+            <TabsTrigger key={tab.key} value={tab.key} className="text-xs sm:text-sm">
+              <tab.icon className="h-4 w-4 mr-1.5" />
+              {isMobile ? tab.label.slice(0, 6) : tab.label}
             </TabsTrigger>
           ))}
         </TabsList>
 
-        <div className="mt-4">
-          <TabsContent value="resumen">{renderResumen()}</TabsContent>
-          <TabsContent value="administradores">{renderAdministradores()}</TabsContent>
-          <TabsContent value="corredores">{renderCorredores()}</TabsContent>
-          <TabsContent value="usuarios">{renderUsuarios()}</TabsContent>
-          <TabsContent value="roles">{renderRoles()}</TabsContent>
-          <TabsContent value="auditoria">{renderAuditoria()}</TabsContent>
-        </div>
+        <TabsContent value="overview" className="mt-4">
+          <OverviewTab />
+        </TabsContent>
+
+        {isSuperAdmin && (
+          <TabsContent value="admins" className="mt-4">
+            <AdminsTab />
+          </TabsContent>
+        )}
+
+        <TabsContent value="agents" className="mt-4">
+          <AgentsTab />
+        </TabsContent>
+
+        <TabsContent value="config" className="mt-4">
+          <ConfigTab />
+        </TabsContent>
       </Tabs>
 
-      {/* Create Admin Dialog */}
-      {renderModal(
-        createAdminOpen, setCreateAdminOpen, 'Nuevo administrador',
-        createAdminFormContent,
-        <div className="flex gap-2 w-full">
-          <Button variant="outline" className="flex-1" onClick={() => setCreateAdminOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button className="flex-1" onClick={handleCreateAdmin} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Crear</Button>
-        </div>
-      )}
+      {/* ============================================================ */}
+      {/* DIALOGS & SHEETS */}
+      {/* ============================================================ */}
 
-      {/* Edit Admin Dialog */}
-      {renderModal(
-        editAdminOpen, setEditAdminOpen, 'Editar administrador',
-        editAdminFormContent,
-        <div className="flex gap-2 w-full">
-          <Button variant="outline" className="flex-1" onClick={() => setEditAdminOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button className="flex-1" onClick={handleEditAdmin} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Guardar</Button>
-        </div>
-      )}
-
-      {/* Create Agent Dialog */}
-      {renderModal(
-        createAgentOpen, setCreateAgentOpen, 'Nuevo corredor',
-        createAgentFormContent,
-        <div className="flex gap-2 w-full">
-          <Button variant="outline" className="flex-1" onClick={() => setCreateAgentOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button className="flex-1" onClick={handleCreateAgent} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Crear</Button>
-        </div>
-      )}
-
-      {/* Edit Agent Dialog */}
-      {renderModal(
-        editAgentOpen, setEditAgentOpen, 'Editar corredor',
-        editAgentFormContent,
-        <div className="flex gap-2 w-full">
-          <Button variant="outline" className="flex-1" onClick={() => setEditAgentOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button className="flex-1" onClick={handleEditAgent} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Guardar</Button>
-        </div>
-      )}
-
-      {/* Agent Ficha Sheet/Dialog */}
-      {renderModal(
-        fichaOpen, setFichaOpen, 'Ficha de corredor',
-        fichaContent,
-        <div className="flex gap-2 w-full">
-          <Button variant="outline" className="flex-1" onClick={() => setFichaOpen(false)}>Cerrar</Button>
-        </div>
-      )}
-
-      {/* Create User Dialog */}
-      {renderModal(
-        createUserOpen, setCreateUserOpen, 'Nuevo usuario',
-        createUserFormContent,
-        <div className="flex gap-2 w-full">
-          <Button variant="outline" className="flex-1" onClick={() => setCreateUserOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button className="flex-1" onClick={handleCreateUser} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Crear</Button>
-        </div>
-      )}
-
-      {/* Edit User Dialog */}
-      {renderModal(
-        editUserOpen, setEditUserOpen, 'Editar usuario',
-        editUserFormContent,
-        <div className="flex gap-2 w-full">
-          <Button variant="outline" className="flex-1" onClick={() => setEditUserOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button className="flex-1" onClick={handleEditUser} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Guardar</Button>
-        </div>
-      )}
-
-      {/* View User Dialog */}
-      {renderModal(
-        viewUserOpen, setViewUserOpen, 'Detalle de usuario',
-        viewingUser ? <ViewUserContent user={viewingUser} /> : null,
-        <Button variant="outline" className="w-full" onClick={() => setViewUserOpen(false)}>Cerrar</Button>
-      )}
-
-      {/* Change Role Dialog */}
-      {renderModal(
-        changeRoleOpen, setChangeRoleOpen, 'Cambiar rol',
-        changingRoleUser ? (
-          <div className="space-y-4">
-            <div className="p-3 bg-gray-50 rounded-lg">
-              <p className="text-sm font-medium">{changingRoleUser.name} {changingRoleUser.lastName || ''}</p>
-              <p className="text-xs text-gray-500">{changingRoleUser.email}</p>
-              <div className="mt-1">{getRoleBadge(changingRoleUser.role?.name || '')}</div>
+      {/* ---- Create Admin ---- */}
+      {isMobile ? (
+        <Sheet open={createAdminOpen} onOpenChange={setCreateAdminOpen}>
+          <SheetContent side="bottom" className="h-[85vh]">
+            <SheetHeader>
+              <SheetTitle>Nuevo Administrador</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4">
+              <AdminFormContent form={adminForm} setForm={setAdminForm} isEdit={false} />
             </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Nuevo rol</Label>
-              <RoleSelectorCards selectedRoleId={selectedNewRole} onSelectRoleId={setSelectedNewRole} availableRoleNames={assignableRoles} allRoleNames={allRoleKeys} roles={roles} />
+            <div className="mt-4 flex gap-3">
+              <Button variant="outline" className="flex-1 h-11" onClick={() => setCreateAdminOpen(false)}>Cancelar</Button>
+              <Button className="flex-1 h-11" onClick={handleCreateAdmin} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                Crear
+              </Button>
             </div>
-          </div>
-        ) : null,
-        <div className="flex gap-2 w-full">
-          <Button variant="outline" className="flex-1" onClick={() => setChangeRoleOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button className="flex-1" onClick={handleChangeRole} disabled={saving || !selectedNewRole}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Cambiar rol</Button>
-        </div>
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={createAdminOpen} onOpenChange={setCreateAdminOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Nuevo Administrador</DialogTitle>
+              <DialogDescription>Crea una nueva cuenta de administrador de grupo</DialogDescription>
+            </DialogHeader>
+            <AdminFormContent form={adminForm} setForm={setAdminForm} isEdit={false} />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreateAdminOpen(false)}>Cancelar</Button>
+              <Button onClick={handleCreateAdmin} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                Crear Administrador
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
-      {/* Reset Password Dialog */}
-      {renderModal(
-        resetPasswordOpen, setResetPasswordOpen, 'Resetear contraseña',
-        resetPasswordContent,
-        <div className="flex gap-2 w-full">
-          <Button variant="outline" className="flex-1" onClick={() => setResetPasswordOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button className="flex-1" onClick={handleResetPassword} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Guardar</Button>
-        </div>
+      {/* ---- Edit Admin ---- */}
+      {isMobile ? (
+        <Sheet open={editAdminOpen} onOpenChange={setEditAdminOpen}>
+          <SheetContent side="bottom" className="h-[85vh]">
+            <SheetHeader>
+              <SheetTitle>Editar Administrador</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4">
+              <AdminFormContent form={editAdminForm} setForm={setEditAdminForm} isEdit={true} />
+            </div>
+            <div className="mt-4 flex gap-3">
+              <Button variant="outline" className="flex-1 h-11" onClick={() => setEditAdminOpen(false)}>Cancelar</Button>
+              <Button className="flex-1 h-11" onClick={handleUpdateAdmin} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
+                Guardar
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={editAdminOpen} onOpenChange={setEditAdminOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Editar Administrador</DialogTitle>
+              <DialogDescription>Modifica los datos del administrador</DialogDescription>
+            </DialogHeader>
+            <AdminFormContent form={editAdminForm} setForm={setEditAdminForm} isEdit={true} />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditAdminOpen(false)}>Cancelar</Button>
+              <Button onClick={handleUpdateAdmin} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
+                Guardar Cambios
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
-      {/* Confirm Dialog */}
-      <AlertDialog open={confirmDialog.open} onOpenChange={(open) => !open && setConfirmDialog({ ...confirmDialog, open: false })}>
+      {/* ---- Create Agent ---- */}
+      {isMobile ? (
+        <Sheet open={createAgentOpen} onOpenChange={setCreateAgentOpen}>
+          <SheetContent side="bottom" className="h-[85vh]">
+            <SheetHeader>
+              <SheetTitle>Nuevo Corredor</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4">
+              <AgentFormContent form={agentForm} setForm={setAgentForm} isEdit={false} />
+            </div>
+            <div className="mt-4 flex gap-3">
+              <Button variant="outline" className="flex-1 h-11" onClick={() => setCreateAgentOpen(false)}>Cancelar</Button>
+              <Button className="flex-1 h-11" onClick={handleCreateAgent} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UserPlus className="h-4 w-4 mr-2" />}
+                Crear
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={createAgentOpen} onOpenChange={setCreateAgentOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Nuevo Corredor</DialogTitle>
+              <DialogDescription>
+                {isSuperAdmin ? 'Crea una nueva cuenta de corredor/agente' : 'Crea un nuevo corredor asignado a tu grupo'}
+              </DialogDescription>
+            </DialogHeader>
+            <AgentFormContent form={agentForm} setForm={setAgentForm} isEdit={false} />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreateAgentOpen(false)}>Cancelar</Button>
+              <Button onClick={handleCreateAgent} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UserPlus className="h-4 w-4 mr-2" />}
+                Crear Corredor
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ---- Edit Agent ---- */}
+      {isMobile ? (
+        <Sheet open={editAgentOpen} onOpenChange={setEditAgentOpen}>
+          <SheetContent side="bottom" className="h-[85vh]">
+            <SheetHeader>
+              <SheetTitle>Editar Corredor</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4">
+              <AgentFormContent form={editAgentForm} setForm={setEditAgentForm} isEdit={true} />
+            </div>
+            <div className="mt-4 flex gap-3">
+              <Button variant="outline" className="flex-1 h-11" onClick={() => setEditAgentOpen(false)}>Cancelar</Button>
+              <Button className="flex-1 h-11" onClick={handleUpdateAgent} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
+                Guardar
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={editAgentOpen} onOpenChange={setEditAgentOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Editar Corredor</DialogTitle>
+              <DialogDescription>Modifica los datos del corredor</DialogDescription>
+            </DialogHeader>
+            <AgentFormContent form={editAgentForm} setForm={setEditAgentForm} isEdit={true} />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditAgentOpen(false)}>Cancelar</Button>
+              <Button onClick={handleUpdateAgent} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
+                Guardar Cambios
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ---- Portfolio (Ficha de Corredor) ---- */}
+      {isMobile ? (
+        <Sheet open={portfolioOpen} onOpenChange={setPortfolioOpen}>
+          <SheetContent side="bottom" className="h-[90vh]">
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2">
+                <ChevronLeft className="h-5 w-5" />
+                Ficha de Corredor
+              </SheetTitle>
+            </SheetHeader>
+            <div className="mt-4">
+              <PortfolioContent />
+            </div>
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={portfolioOpen} onOpenChange={setPortfolioOpen}>
+          <DialogContent className="sm:max-w-3xl max-h-[85vh]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Eye className="h-5 w-5 text-emerald-600" />
+                Ficha de Corredor
+              </DialogTitle>
+              <DialogDescription>Detalle completo del corredor y su cartera</DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="max-h-[65vh]">
+              <PortfolioContent />
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ---- Reset Password ---- */}
+      {isMobile ? (
+        <Sheet open={resetPasswordOpen} onOpenChange={setResetPasswordOpen}>
+          <SheetContent side="bottom" className="h-auto">
+            <SheetHeader>
+              <SheetTitle>Resetear Contraseña</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4">
+              <ResetPasswordContent />
+            </div>
+            <div className="mt-4 flex gap-3">
+              <Button variant="outline" className="flex-1 h-11" onClick={() => setResetPasswordOpen(false)}>Cancelar</Button>
+              <Button className="flex-1 h-11" onClick={handleResetPassword} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <KeyRound className="h-4 w-4 mr-2" />}
+                Restablecer
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={resetPasswordOpen} onOpenChange={setResetPasswordOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Resetear Contraseña</DialogTitle>
+              <DialogDescription>Establece una nueva contraseña para el usuario</DialogDescription>
+            </DialogHeader>
+            <ResetPasswordContent />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setResetPasswordOpen(false)}>Cancelar</Button>
+              <Button onClick={handleResetPassword} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <KeyRound className="h-4 w-4 mr-2" />}
+                Restablecer Contraseña
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ---- Confirm Dialog ---- */}
+      <AlertDialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog({ ...confirmDialog, open })}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{confirmDialog.title}</AlertDialogTitle>
@@ -2267,7 +2275,10 @@ export default function AdminPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDialog.onConfirm} className={confirmDialog.variant === 'destructive' ? 'bg-red-600 hover:bg-red-700' : ''}>
+            <AlertDialogAction
+              onClick={confirmDialog.onConfirm}
+              className={confirmDialog.variant === 'destructive' ? 'bg-red-600 hover:bg-red-700' : ''}
+            >
               Confirmar
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -2276,3 +2287,5 @@ export default function AdminPage() {
     </div>
   )
 }
+
+

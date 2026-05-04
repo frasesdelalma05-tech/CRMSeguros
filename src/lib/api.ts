@@ -283,11 +283,6 @@ export interface AdminUser {
   lastName: string
   phone?: string
   position?: string
-  documentType?: string
-  documentNumber?: string
-  office?: string
-  createdById?: string
-  managerId?: string
   roleId: string
   isActive: boolean
   lastLogin?: string
@@ -295,35 +290,6 @@ export interface AdminUser {
   updatedAt: string
   role?: { id: string; name: string; description?: string }
   permissions?: { id: string; name: string; module: string; action: string }[]
-  createdBy?: { id: string; name: string; lastName: string }
-  manager?: { id: string; name: string; lastName: string }
-  _count?: {
-    managedUsers?: number
-    createdUsers?: number
-    assignedClients?: number
-    soldPolicies?: number
-    ownedPolicies?: number
-    assignedLeads?: number
-  }
-}
-
-export interface AdminSummary {
-  totalAdmins: number
-  totalAgents: number
-  activeAgents: number
-  inactiveAgents: number
-  totalClients: number
-  totalPolicies: number
-  totalPremium: number
-}
-
-export interface AgentPortfolio {
-  agent: AdminUser
-  clients: Client[]
-  policies: Policy[]
-  appointments: number
-  totalPremium: number
-  pendingAppointments: number
 }
 
 export interface DniSearchResult {
@@ -625,12 +591,12 @@ export const api = {
 
   // Admin - Summary
   getAdminSummary: () =>
-    request<{ data: AdminSummary }>('/admin/summary'),
+    request<{ data: { kpis: { totalAdmins?: number; totalCorredores: number; totalClients: number; totalPolicies: number; totalPremium: number }; admins?: Array<{ id: string; name: string; lastName: string; email: string; isActive: boolean; corredoresCount: number; clientsCount: number; policiesCount: number; premium: number }>; agents?: Array<{ id: string; name: string; lastName: string; email: string; isActive: boolean; clientsCount: number; policiesCount: number; premium: number }> } }>('/admin/summary'),
 
-  // Admin - Admins (administradores)
+  // Admin - Administradores
   getAdmins: (params?: Record<string, string>) => {
     const query = params ? '?' + new URLSearchParams(params).toString() : ''
-    return request<{ data: AdminUser[]; total: number; page: number; limit: number }>(`/admin/admins${query}`)
+    return request<{ data: Array<AdminUser & { managerId?: string; documentType?: string; documentNumber?: string; office?: string; stats: { corredoresCount: number; clientsCount: number; policiesCount: number; premium: number } }>; total: number; page: number; limit: number }>(`/admin/admins${query}`)
   },
   createAdmin: (data: Record<string, unknown>) =>
     request<{ data: AdminUser }>('/admin/admins', { method: 'POST', body: JSON.stringify(data) }),
@@ -640,20 +606,20 @@ export const api = {
   // Admin - Agents (corredores)
   getAgents: (params?: Record<string, string>) => {
     const query = params ? '?' + new URLSearchParams(params).toString() : ''
-    return request<{ data: AdminUser[]; total: number; page: number; limit: number }>(`/admin/agents${query}`)
+    return request<{ data: (AdminUser & { _count: { assignedClients: number; soldPolicies: number; ownedPolicies: number; assignedLeads: number }; manager?: { id: string; name: string; lastName: string; email: string } })[]; total: number; page: number; limit: number }>(`/admin/agents${query}`)
   },
   createAgent: (data: Record<string, unknown>) =>
-    request<{ data: AdminUser }>('/admin/agents', { method: 'POST', body: JSON.stringify(data) }),
+    request<{ data: AdminUser & { manager?: { id: string; name: string; lastName: string; email: string }; _count: { assignedClients: number; soldPolicies: number; ownedPolicies: number; assignedLeads: number } } }>('/admin/agents', { method: 'POST', body: JSON.stringify(data) }),
   updateAgent: (id: string, data: Record<string, unknown>) =>
-    request<{ data: AdminUser }>(`/admin/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    request<{ data: AdminUser & { manager?: { id: string; name: string; lastName: string; email: string }; _count: { assignedClients: number; soldPolicies: number; ownedPolicies: number; assignedLeads: number } } }>(`/admin/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   toggleAgentStatus: (id: string) =>
     request<{ data: AdminUser; message: string }>(`/admin/agents/${id}/toggle-status`, { method: 'PATCH' }),
   getAgentPortfolio: (id: string) =>
-    request<{ data: AgentPortfolio }>(`/admin/agents/${id}/portfolio`),
+    request<{ data: { agent: { id: string; name: string; lastName: string; email: string; phone?: string; office?: string; isActive: boolean; manager?: { id: string; name: string; lastName: string; email: string } }; clients: Array<{ id: string; name: string; lastName: string; email: string; phone?: string; status: string }>; policies: Array<{ id: string; policyNumber: string; productName: string; status: string; premium: number; startDate: string; endDate: string; client: { id: string; name: string; lastName: string; email: string }; product?: { id: string; name: string; category: string } }>; appointments: Array<{ id: string; title: string; type: string; status: string; date: string; endDate?: string; client?: { id: string; name: string; lastName: string } }>; totalPremium: number; stats: { totalClients: number; totalPolicies: number; activePolicies: number; totalAppointments: number; totalPremium: number } } }>(`/admin/agents/${id}/portfolio`),
 
-  // Admin - Password reset
-  resetUserPassword: (id: string, data: { newPassword: string }) =>
-    request<{ message: string }>(`/admin/users/${id}/reset-password`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // Admin - Reset Password
+  resetUserPassword: (id: string, newPassword: string) =>
+    request<{ message: string }>(`/admin/users/${id}/reset-password`, { method: 'PATCH', body: JSON.stringify({ newPassword }) }),
 
   // Admin - Audit Logs
   getAuditLogs: (params?: Record<string, string>) => {

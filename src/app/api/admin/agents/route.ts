@@ -6,7 +6,7 @@ import { db } from '@/lib/db';
 import { hasAdminAccess, isSuperAdmin, isAdministrador } from '@/lib/permissions';
 
 // ============================================================
-// ZOD SCHEMA
+// ZOD SCHEMA — Create agent
 // ============================================================
 const createAgentSchema = z.object({
   email: z.string().email('Email inválido'),
@@ -14,16 +14,15 @@ const createAgentSchema = z.object({
   name: z.string().min(1, 'El nombre es obligatorio'),
   lastName: z.string().optional(),
   phone: z.string().optional(),
-  position: z.string().optional(),
   documentType: z.string().optional(),
   documentNumber: z.string().optional(),
   office: z.string().optional(),
-  managerId: z.string().optional(), // Only super_admin can specify
+  managerId: z.string().optional(),
   isActive: z.boolean().optional(),
 });
 
 // ============================================================
-// GET /api/admin/agents - List all corredores/agentes
+// GET /api/admin/agents — List corredores/agentes
 // ============================================================
 export async function GET(request: NextRequest) {
   try {
@@ -70,17 +69,14 @@ export async function GET(request: NextRequest) {
       where.isActive = false;
     }
 
-    // Administrador should only see their own corredores
+    // ── For administrador: only show corredores where managerId = their userId ──
     if (isAdministrador(user.roleName)) {
-      where.OR = [
-        { managerId: user.userId },
-        { createdById: user.userId },
-      ];
-    }
-
-    // Super_admin can filter by managerId
-    if (isSuperAdmin(user.roleName) && managerIdFilter) {
-      where.managerId = managerIdFilter;
+      where.managerId = user.userId;
+    } else if (isSuperAdmin(user.roleName)) {
+      // super_admin can filter by managerId param
+      if (managerIdFilter) {
+        where.managerId = managerIdFilter;
+      }
     }
 
     const [agents, total] = await Promise.all([
@@ -88,8 +84,7 @@ export async function GET(request: NextRequest) {
         where,
         include: {
           role: { select: { id: true, name: true } },
-          manager: { select: { id: true, name: true, lastName: true } },
-          createdBy: { select: { id: true, name: true, lastName: true } },
+          manager: { select: { id: true, name: true, lastName: true, email: true } },
           _count: {
             select: {
               assignedClients: true,
@@ -122,7 +117,7 @@ export async function GET(request: NextRequest) {
 }
 
 // ============================================================
-// POST /api/admin/agents - Create a new corredor/agente
+// POST /api/admin/agents — Create corredor/agent
 // ============================================================
 export async function POST(request: NextRequest) {
   try {
@@ -131,19 +126,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    // Only super_administrador and administrador can create agents
     if (!hasAdminAccess(user.roleName)) {
-      return NextResponse.json(
-        { error: 'Solo administradores pueden crear corredores/agentes.' },
-        { status: 403 }
-      );
-    }
-
-    if (!isSuperAdmin(user.roleName) && !isAdministrador(user.roleName)) {
-      return NextResponse.json(
-        { error: 'No tienes permiso para crear usuarios.' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: 'Acceso denegado' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -162,13 +146,47 @@ export async function POST(request: NextRequest) {
       name,
       lastName,
       phone,
-      position,
       documentType,
       documentNumber,
       office,
-      managerId,
+      managerId: requestedManagerId,
       isActive,
     } = validation.data;
+
+    // Determine managerId based on role
+    let finalManagerId: string | null = null;
+
+    if (isSuperAdmin(user.roleName)) {
+      // super_admin: managerId is required
+      if (!requestedManagerId) {
+        return NextResponse.json(
+          { error: 'El campo managerId es obligatorio', details: { managerId: ['El managerId es obligatorio cuando el usuario es super_administrador'] } },
+          { status: 400 }
+        );
+      }
+      // Validate managerId is a valid administrador
+      const managerUser = await db.user.findFirst({
+        where: { id: requestedManagerId, deletedAt: null },
+        include: { role: true },
+      });
+      if (!managerUser || managerUser.role.name !== 'administrador') {
+        return NextResponse.json(
+          { error: 'El managerId especificado no corresponde a un administrador válido' },
+          { status: 400 }
+        );
+      }
+      finalManagerId = requestedManagerId;
+    } else if (isAdministrador(user.roleName)) {
+      // administrador: managerId is auto-set to their own userId
+      // Cannot specify managerId
+      if (requestedManagerId && requestedManagerId !== user.userId) {
+        return NextResponse.json(
+          { error: 'No puedes asignar un manager diferente a ti mismo' },
+          { status: 403 }
+        );
+      }
+      finalManagerId = user.userId;
+    }
 
     // Check email uniqueness
     const existing = await db.user.findUnique({ where: { email } });
@@ -176,41 +194,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'El email ya está registrado' }, { status: 409 });
     }
 
-    // Get the corredor role
+    // Get corredor role
     const corredorRole = await db.role.findFirst({ where: { name: 'corredor' } });
     if (!corredorRole) {
-      return NextResponse.json({ error: 'Rol de corredor no encontrado en el sistema' }, { status: 500 });
+      return NextResponse.json({ error: 'Rol de corredor no encontrado' }, { status: 404 });
     }
 
-    // Determine managerId:
-    // - administrador creates: managerId = their id
-    // - super_admin creates: managerId can be specified, otherwise null
-    let resolvedManagerId: string | null = null;
-    if (isAdministrador(user.roleName)) {
-      resolvedManagerId = user.userId;
-    } else if (isSuperAdmin(user.roleName) && managerId) {
-      // Verify the specified manager exists and is an administrador
-      const managerUser = await db.user.findFirst({
-        where: { id: managerId, deletedAt: null },
-        include: { role: true },
-      });
-      if (!managerUser || managerUser.role.name !== 'administrador') {
-        return NextResponse.json(
-          { error: 'El manager especificado no es un administrador válido.' },
-          { status: 400 }
-        );
-      }
-      resolvedManagerId = managerId;
-    }
-
-    // Create user in Supabase Auth first, fall back to legacy bcrypt if unavailable
+    // Create user in Supabase Auth first
     let supabaseId: string | null = null;
-    let hashedPassword: string | null = null;
 
     try {
       const supabase = createServerClient();
 
-      // Check if user already exists in Supabase Auth
       const { data: listData } = await supabase.auth.admin.listUsers();
       const existingAuthUser = listData?.users?.find((u) => u.email === email);
 
@@ -232,35 +227,37 @@ export async function POST(request: NextRequest) {
 
         supabaseId = authData.user?.id ?? null;
       }
-    } catch (err) {
-      // Supabase Auth unavailable — fall back to legacy bcrypt password hashing
-      console.warn('Supabase Auth unavailable, falling back to legacy auth:', err);
-      hashedPassword = await hashPassword(password);
+    } catch {
+      return NextResponse.json(
+        { error: 'Error al crear usuario en Supabase Auth. El usuario no fue creado.' },
+        { status: 400 }
+      );
     }
 
-    // Create user in our database with corredor role
+    // Hash password as fallback
+    const hashedPassword = await hashPassword(password);
+
+    // Create user in our database
     try {
-      const newAgent = await db.user.create({
+      const newUser = await db.user.create({
         data: {
           email,
-          password: supabaseId ? null : hashedPassword, // Supabase-managed or legacy bcrypt
+          password: hashedPassword,
           supabaseId,
           name,
           lastName: lastName || null,
           phone: phone || null,
-          position: position || null,
           documentType: documentType || null,
           documentNumber: documentNumber || null,
           office: office || null,
           roleId: corredorRole.id,
-          createdById: user.userId,
-          managerId: resolvedManagerId,
           isActive: isActive !== undefined ? isActive : true,
+          createdById: user.userId,
+          managerId: finalManagerId,
         },
         include: {
           role: { select: { id: true, name: true } },
-          manager: { select: { id: true, name: true, lastName: true } },
-          createdBy: { select: { id: true, name: true, lastName: true } },
+          manager: { select: { id: true, name: true, lastName: true, email: true } },
           _count: {
             select: {
               assignedClients: true,
@@ -277,31 +274,26 @@ export async function POST(request: NextRequest) {
         data: {
           userId: user.userId,
           action: 'create',
-          entity: 'agent',
-          entityId: newAgent.id,
+          entity: 'user',
+          entityId: newUser.id,
           details: JSON.stringify({
             email,
             name,
             lastName,
             roleName: 'corredor',
-            method: supabaseId ? 'supabase' : 'legacy',
-            createdBy: user.roleName,
-            managerId: resolvedManagerId,
-            documentType: documentType || null,
-            documentNumber: documentNumber || null,
-            office: office || null,
+            managerId: finalManagerId,
+            method: 'supabase',
           }),
         },
       });
 
-      // Remove sensitive fields from response
-      const { password: _, refreshToken: __, ...safeAgent } = newAgent;
+      const { password: _, refreshToken: __, ...safeUser } = newUser;
 
-      return NextResponse.json({ data: safeAgent }, { status: 201 });
+      return NextResponse.json({ data: safeUser }, { status: 201 });
     } catch (dbError) {
       console.error('DB creation failed after Supabase Auth success:', dbError);
       return NextResponse.json(
-        { error: 'Corredor creado en Supabase Auth pero falló la creación en la base de datos. Contacta al administrador.' },
+        { error: 'Usuario creado en Supabase Auth pero falló la creación en la base de datos.' },
         { status: 500 }
       );
     }

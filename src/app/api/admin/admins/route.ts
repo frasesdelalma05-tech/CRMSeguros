@@ -6,7 +6,7 @@ import { db } from '@/lib/db';
 import { isSuperAdmin } from '@/lib/permissions';
 
 // ============================================================
-// ZOD SCHEMA
+// ZOD SCHEMAS
 // ============================================================
 const createAdminSchema = z.object({
   email: z.string().email('Email inválido'),
@@ -14,7 +14,6 @@ const createAdminSchema = z.object({
   name: z.string().min(1, 'El nombre es obligatorio'),
   lastName: z.string().optional(),
   phone: z.string().optional(),
-  position: z.string().optional(),
   documentType: z.string().optional(),
   documentNumber: z.string().optional(),
   office: z.string().optional(),
@@ -22,7 +21,7 @@ const createAdminSchema = z.object({
 });
 
 // ============================================================
-// GET /api/admin/admins - List all administradores (super_admin only)
+// GET /api/admin/admins — List administradores (super_admin only)
 // ============================================================
 export async function GET(request: NextRequest) {
   try {
@@ -32,10 +31,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (!isSuperAdmin(user.roleName)) {
-      return NextResponse.json(
-        { error: 'Solo un super administrador puede ver la lista de administradores.' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: 'Acceso denegado' }, { status: 403 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -61,7 +57,6 @@ export async function GET(request: NextRequest) {
         { name: { contains: search, mode: 'insensitive' } },
         { lastName: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
-        { position: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -71,15 +66,18 @@ export async function GET(request: NextRequest) {
       where.isActive = false;
     }
 
+    const corredorRole = await db.role.findFirst({ where: { name: 'corredor' } });
+
     const [admins, total] = await Promise.all([
       db.user.findMany({
         where,
         include: {
-          role: { select: { id: true, name: true } },
+          role: { select: { id: true, name: true, description: true } },
           _count: {
             select: {
-              managedUsers: true,
-              createdUsers: true,
+              managedUsers: {
+                where: { roleId: corredorRole?.id, deletedAt: null },
+              },
             },
           },
         },
@@ -90,44 +88,65 @@ export async function GET(request: NextRequest) {
       db.user.count({ where }),
     ]);
 
-    // For each admin, get total clients and policies from their managed corredores
+    // Build per-admin aggregated stats
     const adminsWithStats = await Promise.all(
       admins.map(async (admin) => {
-        const { password, refreshToken, ...safeAdmin } = admin;
+        const { password: _, refreshToken: __, ...safeAdmin } = admin;
 
-        // Get IDs of managed corredores
-        const managedAgentIds = await db.user.findMany({
-          where: { managerId: admin.id, deletedAt: null },
+        // Get corredor IDs managed by this admin
+        const managedCorredores = await db.user.findMany({
+          where: {
+            managerId: admin.id,
+            roleId: corredorRole?.id,
+            deletedAt: null,
+          },
           select: { id: true },
         });
-        const agentIds = managedAgentIds.map((a) => a.id);
+        const corredorIds = managedCorredores.map((c) => c.id);
 
-        let totalClients = 0;
-        let totalPolicies = 0;
+        let clientCount = 0;
+        let policyCount = 0;
+        let premium = 0;
 
-        if (agentIds.length > 0) {
-          totalClients = await db.client.count({
-            where: {
-              ownerAgentId: { in: agentIds },
-              deletedAt: null,
-            },
-          });
-
-          totalPolicies = await db.policy.count({
-            where: {
-              deletedAt: null,
-              OR: [
-                { soldByAgentId: { in: agentIds } },
-                { ownerAgentId: { in: agentIds } },
-              ],
-            },
-          });
+        if (corredorIds.length > 0) {
+          const [cCount, pCount, pPremium] = await Promise.all([
+            db.client.count({
+              where: { ownerAgentId: { in: corredorIds }, deletedAt: null },
+            }),
+            db.policy.count({
+              where: {
+                OR: [
+                  { soldByAgentId: { in: corredorIds } },
+                  { ownerAgentId: { in: corredorIds } },
+                ],
+                deletedAt: null,
+              },
+            }),
+            db.policy.aggregate({
+              where: {
+                OR: [
+                  { soldByAgentId: { in: corredorIds } },
+                  { ownerAgentId: { in: corredorIds } },
+                ],
+                status: 'activa',
+                deletedAt: null,
+              },
+              _sum: { premium: true },
+            }),
+          ]);
+          clientCount = cCount;
+          policyCount = pCount;
+          premium = pPremium._sum.premium ?? 0;
         }
 
         return {
           ...safeAdmin,
-          totalClients,
-          totalPolicies,
+          stats: {
+            corredoresCount: corredorIds.length,
+            clientsCount: clientCount,
+            policiesCount: policyCount,
+            premium,
+          },
         };
       })
     );
@@ -139,13 +158,13 @@ export async function GET(request: NextRequest) {
       limit,
     });
   } catch (error) {
-    console.error('Admins list error:', error);
+    console.error('Admin admins list error:', error);
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 });
   }
 }
 
 // ============================================================
-// POST /api/admin/admins - Create administrador (super_admin only)
+// POST /api/admin/admins — Create administrador (super_admin only)
 // ============================================================
 export async function POST(request: NextRequest) {
   try {
@@ -155,10 +174,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!isSuperAdmin(user.roleName)) {
-      return NextResponse.json(
-        { error: 'Solo un super administrador puede crear administradores.' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: 'Acceso denegado' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -177,7 +193,6 @@ export async function POST(request: NextRequest) {
       name,
       lastName,
       phone,
-      position,
       documentType,
       documentNumber,
       office,
@@ -190,23 +205,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'El email ya está registrado' }, { status: 409 });
     }
 
-    // Get the administrador role
+    // Get administrador role
     const adminRole = await db.role.findFirst({ where: { name: 'administrador' } });
     if (!adminRole) {
-      return NextResponse.json(
-        { error: 'Rol de administrador no encontrado en el sistema' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Rol de administrador no encontrado' }, { status: 404 });
     }
 
-    // Create user in Supabase Auth first, fall back to legacy bcrypt if unavailable
+    // Create user in Supabase Auth first
     let supabaseId: string | null = null;
-    let hashedPassword: string | null = null;
 
     try {
       const supabase = createServerClient();
 
-      // Check if user already exists in Supabase Auth
       const { data: listData } = await supabase.auth.admin.listUsers();
       const existingAuthUser = listData?.users?.find((u) => u.email === email);
 
@@ -228,39 +238,35 @@ export async function POST(request: NextRequest) {
 
         supabaseId = authData.user?.id ?? null;
       }
-    } catch (err) {
-      // Supabase Auth unavailable — fall back to legacy bcrypt password hashing
-      console.warn('Supabase Auth unavailable, falling back to legacy auth:', err);
-      hashedPassword = await hashPassword(password);
+    } catch {
+      return NextResponse.json(
+        { error: 'Error al crear usuario en Supabase Auth. El usuario no fue creado.' },
+        { status: 400 }
+      );
     }
 
-    // Create user in our database with administrador role
+    // Hash password as fallback
+    const hashedPassword = await hashPassword(password);
+
+    // Create user in our database
     try {
-      const newAdmin = await db.user.create({
+      const newUser = await db.user.create({
         data: {
           email,
-          password: supabaseId ? null : hashedPassword, // Supabase-managed or legacy bcrypt
+          password: hashedPassword,
           supabaseId,
           name,
           lastName: lastName || null,
           phone: phone || null,
-          position: position || null,
           documentType: documentType || null,
           documentNumber: documentNumber || null,
           office: office || null,
           roleId: adminRole.id,
-          createdById: user.userId,
           isActive: isActive !== undefined ? isActive : true,
+          createdById: user.userId,
         },
         include: {
-          role: { select: { id: true, name: true } },
-          createdBy: { select: { id: true, name: true, lastName: true } },
-          _count: {
-            select: {
-              managedUsers: true,
-              createdUsers: true,
-            },
-          },
+          role: { select: { id: true, name: true, description: true } },
         },
       });
 
@@ -269,32 +275,30 @@ export async function POST(request: NextRequest) {
         data: {
           userId: user.userId,
           action: 'create',
-          entity: 'admin',
-          entityId: newAdmin.id,
+          entity: 'user',
+          entityId: newUser.id,
           details: JSON.stringify({
             email,
             name,
             lastName,
             roleName: 'administrador',
-            method: supabaseId ? 'supabase' : 'legacy',
-            createdBy: user.roleName,
+            method: 'supabase',
           }),
         },
       });
 
-      // Remove sensitive fields from response
-      const { password: _, refreshToken: __, ...safeAdmin } = newAdmin;
+      const { password: _, refreshToken: __, ...safeUser } = newUser;
 
-      return NextResponse.json({ data: { ...safeAdmin, totalClients: 0, totalPolicies: 0 } }, { status: 201 });
+      return NextResponse.json({ data: safeUser }, { status: 201 });
     } catch (dbError) {
       console.error('DB creation failed after Supabase Auth success:', dbError);
       return NextResponse.json(
-        { error: 'Administrador creado en Supabase Auth pero falló la creación en la base de datos. Contacta al administrador.' },
+        { error: 'Usuario creado en Supabase Auth pero falló la creación en la base de datos.' },
         { status: 500 }
       );
     }
   } catch (error) {
-    console.error('Admin create error:', error);
+    console.error('Admin admin create error:', error);
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 });
   }
 }
