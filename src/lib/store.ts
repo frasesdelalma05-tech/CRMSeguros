@@ -14,7 +14,6 @@ export type PageName =
   | 'leads'
   | 'opportunities'
   | 'policies'
-  | 'policy-detail'
   | 'appointments'
   | 'calendar'
   | 'tasks'
@@ -81,7 +80,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         localStorage.setItem('seguricrm_refresh_token', refreshToken)
       }
     }
-    set({ user, token, refreshToken: refreshToken || null, page: 'dashboard' })
+    // Redirect super_administrador and administrador to admin panel, others to dashboard
+    const isAdminRole = user.role === 'super_administrador' || user.role === 'administrador'
+    set({ user, token, refreshToken: refreshToken || null, page: isAdminRole ? 'admin' : 'dashboard' })
   },
 
   logout: async () => {
@@ -111,11 +112,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (savedToken && savedUser) {
         try {
           const parsedUser = JSON.parse(savedUser)
+          const isAdminRole = parsedUser.role === 'super_administrador' || parsedUser.role === 'administrador'
           set({
             user: parsedUser,
             token: savedToken,
             refreshToken: savedRefreshToken,
-            page: 'dashboard',
+            page: isAdminRole ? 'admin' : 'dashboard',
           })
         } catch {
           localStorage.removeItem('seguricrm_token')
@@ -162,7 +164,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               user,
               token: session.access_token,
               refreshToken: session.refresh_token,
-              page: 'dashboard',
+              page: (user.role === 'super_administrador' || user.role === 'administrador') ? 'admin' : 'dashboard',
               isSupabaseSession: true,
             })
           }

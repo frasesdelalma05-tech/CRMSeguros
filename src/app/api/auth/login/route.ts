@@ -27,26 +27,16 @@ export async function POST(request: NextRequest) {
 
     const { email, password } = validation.data;
 
-    // ── 1. Try Supabase Auth first ──────────────────────────────
+    // ── 1. Try Supabase Auth first (graceful fallback if not configured) ──
     let supabaseResult: Awaited<ReturnType<typeof supabaseSignIn>> | null = null;
-    let supabaseAvailable = false;
-
     try {
       supabaseResult = await supabaseSignIn(email, password);
-      supabaseAvailable = true;
-
-      if (supabaseResult.error) {
-        console.warn(`[Auth] Supabase Auth rejected sign-in for email=${email}: ${supabaseResult.error}`);
-      } else {
-        console.log(`[Auth] Supabase Auth sign-in succeeded for email=${email}`);
-      }
-    } catch (err) {
-      // Supabase Auth is unavailable (missing env vars, network error, etc.)
-      console.warn('[Auth] Supabase Auth unavailable, falling back to legacy auth:', err instanceof Error ? err.message : err);
-      supabaseAvailable = false;
+    } catch {
+      // Supabase not configured or unavailable — fall through to legacy JWT
+      supabaseResult = null;
     }
 
-    if (supabaseAvailable && supabaseResult && supabaseResult.data && !supabaseResult.error) {
+    if (supabaseResult && supabaseResult.data && !supabaseResult.error) {
       const supabaseSession = supabaseResult.data.session;
       const supabaseUser = supabaseResult.data.user;
       const supabaseId = supabaseUser.id;
@@ -57,16 +47,12 @@ export async function POST(request: NextRequest) {
         include: { role: { include: { permissions: true } } },
       });
 
-      console.log(`[Auth] DB lookup by supabaseId=${supabaseId}: ${dbUser ? `found userId=${dbUser.id}` : 'not found'}`);
-
       // If not found by supabaseId, try by email and link
       if (!dbUser) {
         dbUser = await db.user.findUnique({
           where: { email },
           include: { role: { include: { permissions: true } } },
         });
-
-        console.log(`[Auth] DB lookup by email=${email}: ${dbUser ? `found userId=${dbUser.id} supabaseId=${dbUser.supabaseId ?? '(none)'} isActive=${dbUser.isActive}` : 'not found'}`);
 
         if (dbUser && dbUser.isActive && !dbUser.deletedAt) {
           // Link the Supabase ID to our user record
@@ -75,31 +61,13 @@ export async function POST(request: NextRequest) {
             data: { supabaseId },
             include: { role: { include: { permissions: true } } },
           });
-          console.log(`[Auth] Linked supabaseId to userId=${dbUser.id}`);
         }
       }
 
-      if (!dbUser) {
-        console.error(`[Auth] Supabase Auth succeeded but NO internal user found for email=${email} supabaseId=${supabaseId}. User must exist in the internal DB before login.`);
+      if (!dbUser || !dbUser.isActive) {
         return NextResponse.json(
-          { error: 'Usuario no encontrado en el sistema. Contacta al administrador.' },
+          { error: 'Usuario no encontrado en el sistema' },
           { status: 404 }
-        );
-      }
-
-      if (!dbUser.isActive) {
-        console.warn(`[Auth] Supabase Auth succeeded but userId=${dbUser.id} is inactive`);
-        return NextResponse.json(
-          { error: 'Tu cuenta está desactivada. Contacta al administrador.' },
-          { status: 403 }
-        );
-      }
-
-      if (!dbUser.role) {
-        console.error(`[Auth] userId=${dbUser.id} has no role assigned (roleId=${dbUser.roleId})`);
-        return NextResponse.json(
-          { error: 'Usuario sin rol asignado. Contacta al administrador.' },
-          { status: 403 }
         );
       }
 
@@ -137,8 +105,6 @@ export async function POST(request: NextRequest) {
         data: { refreshToken: legacyRefreshToken },
       });
 
-      console.log(`[Auth] Login OK via Supabase Auth. userId=${dbUser.id} role=${dbUser.role.name}`);
-
       return NextResponse.json({
         data: {
           accessToken: supabaseSession.access_token,
@@ -161,54 +127,31 @@ export async function POST(request: NextRequest) {
     }
 
     // ── 2. Fall back to legacy JWT auth ─────────────────────────
-    console.log(`[Auth] Falling back to legacy auth for email=${email}`);
-
     const user = await db.user.findUnique({
       where: { email },
       include: { role: { include: { permissions: true } } },
     });
 
-    if (!user) {
-      console.warn(`[Auth] Legacy login failed: no internal user found for email=${email}`);
+    if (!user || !user.isActive) {
       return NextResponse.json(
-        { error: 'Credenciales incorrectas. Verifica tu email y contraseña.' },
+        { error: 'Credenciales inválidas' },
         { status: 401 }
-      );
-    }
-
-    console.log(`[Auth] Legacy lookup: userId=${user.id} isActive=${user.isActive} hasPassword=${!!user.password} hasSupabaseId=${!!user.supabaseId} roleId=${user.roleId}`);
-
-    if (!user.isActive) {
-      console.warn(`[Auth] Legacy login failed: userId=${user.id} is inactive`);
-      return NextResponse.json(
-        { error: 'Tu cuenta está desactivada. Contacta al administrador.' },
-        { status: 403 }
       );
     }
 
     // Verify password (only possible if user has a stored password)
     if (!user.password) {
-      console.error(`[Auth] Legacy login failed: userId=${user.id} has NO stored password. This user was created with Supabase Auth only but Supabase sign-in failed. Run db:seed:prod to set a fallback password.`);
       return NextResponse.json(
-        { error: 'Credenciales incorrectas. Verifica tu email y contraseña.' },
+        { error: 'Credenciales inválidas' },
         { status: 401 }
       );
     }
 
     const isValid = await verifyPassword(password, user.password);
     if (!isValid) {
-      console.warn(`[Auth] Legacy login failed: wrong password for userId=${user.id}`);
       return NextResponse.json(
-        { error: 'Credenciales incorrectas. Verifica tu email y contraseña.' },
+        { error: 'Credenciales inválidas' },
         { status: 401 }
-      );
-    }
-
-    if (!user.role) {
-      console.error(`[Auth] userId=${user.id} has no role assigned (roleId=${user.roleId})`);
-      return NextResponse.json(
-        { error: 'Usuario sin rol asignado. Contacta al administrador.' },
-        { status: 403 }
       );
     }
 
@@ -244,8 +187,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    console.log(`[Auth] Login OK via legacy auth. userId=${user.id} role=${user.role.name}`);
-
     return NextResponse.json({
       data: {
         accessToken,
@@ -264,7 +205,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('[Auth] Login unexpected error:', error);
+    console.error('Login error:', error);
     return NextResponse.json(
       { error: 'Error interno del servidor' },
       { status: 500 }

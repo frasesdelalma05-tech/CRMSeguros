@@ -148,8 +148,9 @@ export default function AdminPage() {
   const isMobile = useIsMobile()
 
   // ---- Role helpers ----
-  const isSuperAdmin = currentUser?.role === 'super_administrador'
-  const isAdmin = currentUser?.role === 'administrador' || isSuperAdmin
+  const normalizedRole = currentUser?.role?.toLowerCase() ?? ''
+  const isSuperAdmin = normalizedRole === 'super_administrador'
+  const isAdmin = normalizedRole === 'administrador' || isSuperAdmin
 
   // ---- Tab ----
   const [activeTab, setActiveTab] = useState<string>(isSuperAdmin ? 'overview' : 'overview')
