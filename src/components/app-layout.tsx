@@ -50,6 +50,7 @@ import {
 } from 'lucide-react'
 import BottomNavigation from '@/components/bottom-navigation'
 import FAB from '@/components/fab'
+import { useIdleTimeout } from '@/hooks/use-idle-timeout'
 
 // Display type for notifications
 interface NotificationDisplay {
@@ -638,6 +639,9 @@ function AppHeader() {
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  // Auto-logout after 10 minutes of inactivity
+  useIdleTimeout()
+
   return (
     <SidebarProvider>
       <div
