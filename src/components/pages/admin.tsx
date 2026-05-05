@@ -211,14 +211,15 @@ export default function AdminPage() {
 
   // ---- General ----
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean
     title: string
     description: string
-    onConfirm: () => void
+    onConfirm: () => Promise<void>
     variant?: 'destructive' | 'default'
-  }>({ open: false, title: '', description: '', onConfirm: () => {} })
+  }>({ open: false, title: '', description: '', onConfirm: async () => {} })
 
   // ============================================================
   // DATA FETCHING
@@ -380,12 +381,17 @@ export default function AdminPage() {
       variant: admin.isActive ? 'destructive' : 'default',
       onConfirm: async () => {
         try {
+          setDeleting(true)
           await api.updateAdmin(admin.id, { isActive: !admin.isActive })
           toast.success(fullName + (admin.isActive ? ' desactivado' : ' activado'))
+          setConfirmDialog(prev => ({ ...prev, open: false }))
           fetchAdmins()
           fetchSummary()
         } catch (err: any) {
           toast.error('Error', { description: err.message })
+          setConfirmDialog(prev => ({ ...prev, open: false }))
+        } finally {
+          setDeleting(false)
         }
       },
     })
@@ -481,12 +487,17 @@ export default function AdminPage() {
       variant: agent.isActive ? 'destructive' : 'default',
       onConfirm: async () => {
         try {
+          setDeleting(true)
           await api.toggleAgentStatus(agent.id)
           toast.success(fullName + (agent.isActive ? ' desactivado' : ' activado'))
+          setConfirmDialog(prev => ({ ...prev, open: false }))
           fetchAgents()
           fetchSummary()
         } catch (err: any) {
           toast.error('Error', { description: err.message })
+          setConfirmDialog(prev => ({ ...prev, open: false }))
+        } finally {
+          setDeleting(false)
         }
       },
     })
@@ -501,12 +512,17 @@ export default function AdminPage() {
       variant: 'destructive',
       onConfirm: async () => {
         try {
+          setDeleting(true)
           await api.deleteAgent(agent.id)
           toast.success(`${fullName} eliminado correctamente`)
+          setConfirmDialog(prev => ({ ...prev, open: false }))
           fetchAgents()
           fetchSummary()
         } catch (err: any) {
           toast.error('Error al eliminar', { description: err.message })
+          setConfirmDialog(prev => ({ ...prev, open: false }))
+        } finally {
+          setDeleting(false)
         }
       },
     })
@@ -521,12 +537,17 @@ export default function AdminPage() {
       variant: 'destructive',
       onConfirm: async () => {
         try {
+          setDeleting(true)
           await api.deleteAdmin(admin.id)
           toast.success(`${fullName} eliminado correctamente`)
+          setConfirmDialog(prev => ({ ...prev, open: false }))
           fetchAdmins()
           fetchSummary()
         } catch (err: any) {
           toast.error('Error al eliminar', { description: err.message })
+          setConfirmDialog(prev => ({ ...prev, open: false }))
+        } finally {
+          setDeleting(false)
         }
       },
     })
@@ -537,13 +558,16 @@ export default function AdminPage() {
   // ============================================================
   const handleOpenPortfolio = async (agentId: string) => {
     setPortfolioAgentId(agentId)
-    setPortfolioOpen(true)
     setPortfolioLoading(true)
+    setPortfolioData(null)
+    setPortfolioTab('clients')
+    setPortfolioOpen(true)
     try {
       const res = await api.getAgentPortfolio(agentId)
       setPortfolioData(res.data)
     } catch (err: any) {
-      toast.error('Error al cargar cartera', { description: err.message })
+      toast.error('Error al cargar cartera', { description: err.message || 'No se pudo obtener la información del corredor' })
+      setPortfolioOpen(false)
       setPortfolioData(null)
     } finally {
       setPortfolioLoading(false)
@@ -919,7 +943,7 @@ export default function AdminPage() {
       return <div className="p-4 text-center text-muted-foreground">No se pudo cargar la cartera</div>
     }
 
-    const { agent, clients, policies, appointments, stats } = portfolioData
+    const { agent, clients = [], policies = [], appointments = [], stats = { totalClients: 0, totalPolicies: 0, activePolicies: 0, totalAppointments: 0, totalPremium: 0 } } = portfolioData
 
     return (
       <div className="space-y-4">
@@ -2363,9 +2387,14 @@ export default function AdminPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={confirmDialog.onConfirm}
+              onClick={(e) => {
+                e.preventDefault()
+                confirmDialog.onConfirm()
+              }}
+              disabled={deleting}
               className={confirmDialog.variant === 'destructive' ? 'bg-red-600 hover:bg-red-700' : ''}
             >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Confirmar
             </AlertDialogAction>
           </AlertDialogFooter>
