@@ -141,3 +141,82 @@ export async function PATCH(
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 });
   }
 }
+// ============================================================
+// DELETE /api/admin/agents/[id] - Soft delete agent
+// ============================================================
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const user = await authenticateRequestWithSupabase(request.headers);
+    if (!user) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+
+    if (!hasAdminAccess(user.roleName)) {
+      return NextResponse.json(
+        { error: 'Solo administradores pueden eliminar corredores/agentes.' },
+        { status: 403 }
+      );
+    }
+
+    const { id } = await params;
+
+    const targetUser = await db.user.findFirst({
+      where: { id, deletedAt: null },
+      include: { role: true },
+    });
+
+    if (!targetUser) {
+      return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 404 });
+    }
+
+    if (targetUser.role.name !== 'corredor') {
+      return NextResponse.json(
+        { error: 'Solo se pueden eliminar corredores/agentes desde este endpoint.' },
+        { status: 400 }
+      );
+    }
+
+    if (isAdministrador(user.roleName)) {
+      if (targetUser.managerId !== user.userId && targetUser.createdById !== user.userId) {
+        return NextResponse.json(
+          { error: 'Solo puedes eliminar corredores que gestionas o creaste.' },
+          { status: 403 }
+        );
+      }
+    }
+
+    await db.user.update({
+      where: { id },
+      data: {
+        isActive: false,
+        deletedAt: new Date(),
+      },
+    });
+
+    await db.auditLog.create({
+      data: {
+        userId: user.userId,
+        action: 'delete',
+        entity: 'agent',
+        entityId: id,
+        details: JSON.stringify({
+          agentEmail: targetUser.email,
+          agentName: `${targetUser.name} ${targetUser.lastName ?? ''}`.trim(),
+          deletedBy: user.roleName,
+          softDelete: true,
+        }),
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: 'Corredor eliminado correctamente',
+    });
+  } catch (error) {
+    console.error('Agent delete error:', error);
+    return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 });
+  }
+}
