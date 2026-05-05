@@ -602,6 +602,8 @@ export const api = {
     request<{ data: AdminUser }>('/admin/admins', { method: 'POST', body: JSON.stringify(data) }),
   updateAdmin: (id: string, data: Record<string, unknown>) =>
     request<{ data: AdminUser }>(`/admin/admins/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteAdmin: (id: string) =>
+    request<{ message: string }>(`/admin/admins/${id}`, { method: 'DELETE' }),
 
   // Admin - Agents (corredores)
   getAgents: (params?: Record<string, string>) => {
@@ -616,6 +618,8 @@ export const api = {
     request<{ data: AdminUser; message: string }>(`/admin/agents/${id}/toggle-status`, { method: 'PATCH' }),
   getAgentPortfolio: (id: string) =>
     request<{ data: { agent: { id: string; name: string; lastName: string; email: string; phone?: string; office?: string; isActive: boolean; manager?: { id: string; name: string; lastName: string; email: string } }; clients: Array<{ id: string; name: string; lastName: string; email: string; phone?: string; status: string }>; policies: Array<{ id: string; policyNumber: string; productName: string; status: string; premium: number; startDate: string; endDate: string; client: { id: string; name: string; lastName: string; email: string }; product?: { id: string; name: string; category: string } }>; appointments: Array<{ id: string; title: string; type: string; status: string; date: string; endDate?: string; client?: { id: string; name: string; lastName: string } }>; totalPremium: number; stats: { totalClients: number; totalPolicies: number; activePolicies: number; totalAppointments: number; totalPremium: number } } }>(`/admin/agents/${id}/portfolio`),
+  deleteAgent: (id: string) =>
+    request<{ message: string }>(`/admin/agents/${id}`, { method: 'DELETE' }),
 
   // Admin - Reset Password
   resetUserPassword: (id: string, newPassword: string) =>

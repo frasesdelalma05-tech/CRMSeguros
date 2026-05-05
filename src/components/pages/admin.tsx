@@ -24,7 +24,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import {
   Users, Shield, UserCheck, TrendingUp, DollarSign, Plus, Pencil, KeyRound,
   Eye, Search, Building2, Loader2, X, Check, ArrowUpDown, Settings, ChevronLeft,
-  UserPlus, FileText, Calendar,
+  UserPlus, FileText, Calendar, Trash2,
 } from 'lucide-react'
 
 // ============================================================
@@ -492,6 +492,46 @@ export default function AdminPage() {
     })
   }
 
+  const handleDeleteAgent = (agent: AgentWithStats) => {
+    const fullName = formatName(agent.name, agent.lastName)
+    setConfirmDialog({
+      open: true,
+      title: '¿Eliminar corredor?',
+      description: `¿Estás seguro de eliminar a ${fullName}? Esta acción no se puede deshacer. El corredor será desactivado y marcado como eliminado.`,
+      variant: 'destructive',
+      onConfirm: async () => {
+        try {
+          await api.deleteAgent(agent.id)
+          toast.success(`${fullName} eliminado correctamente`)
+          fetchAgents()
+          fetchSummary()
+        } catch (err: any) {
+          toast.error('Error al eliminar', { description: err.message })
+        }
+      },
+    })
+  }
+
+  const handleDeleteAdmin = (admin: AdminWithStats) => {
+    const fullName = formatName(admin.name, admin.lastName)
+    setConfirmDialog({
+      open: true,
+      title: '¿Eliminar administrador?',
+      description: `¿Estás seguro de eliminar a ${fullName}? Sus corredores serán desasignados. Esta acción no se puede deshacer.`,
+      variant: 'destructive',
+      onConfirm: async () => {
+        try {
+          await api.deleteAdmin(admin.id)
+          toast.success(`${fullName} eliminado correctamente`)
+          fetchAdmins()
+          fetchSummary()
+        } catch (err: any) {
+          toast.error('Error al eliminar', { description: err.message })
+        }
+      },
+    })
+  }
+
   // ============================================================
   // PORTFOLIO
   // ============================================================
@@ -939,6 +979,24 @@ export default function AdminPage() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{agent.isActive ? 'Desactivar' : 'Activar'} cuenta</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => {
+                      const agentObj = agents.find(a => a.id === agent.id)
+                      if (agentObj) {
+                        setPortfolioOpen(false)
+                        setTimeout(() => handleDeleteAgent(agentObj), 200)
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Eliminar</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
@@ -1613,6 +1671,9 @@ export default function AdminPage() {
                   <Button variant="outline" size="sm" className="text-xs" onClick={() => handleOpenResetPassword(admin.id, formatName(admin.name, admin.lastName))}>
                     <KeyRound className="h-3.5 w-3.5 mr-1" /> Contraseña
                   </Button>
+                  <Button variant="outline" size="sm" className="text-xs text-red-600 hover:text-red-700" onClick={() => handleDeleteAdmin(admin)}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1" /> Eliminar
+                  </Button>
                 </div>
               </Card>
             ))}
@@ -1692,6 +1753,16 @@ export default function AdminPage() {
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>Resetear contraseña</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="sm" onClick={() => handleDeleteAdmin(admin)}>
+                                  <Trash2 className="h-4 w-4 text-red-500" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Eliminar</TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
                         </div>
@@ -1835,6 +1906,9 @@ export default function AdminPage() {
                 <Button variant="outline" size="sm" className="text-xs" onClick={() => handleOpenResetPassword(agent.id, formatName(agent.name, agent.lastName))}>
                   <KeyRound className="h-3.5 w-3.5 mr-1" /> Contraseña
                 </Button>
+                <Button variant="outline" size="sm" className="text-xs text-red-600 hover:text-red-700" onClick={() => handleDeleteAgent(agent)}>
+                  <Trash2 className="h-3.5 w-3.5 mr-1" /> Eliminar
+                </Button>
               </div>
             </Card>
           ))}
@@ -1916,6 +1990,16 @@ export default function AdminPage() {
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>Resetear contraseña</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="sm" onClick={() => handleDeleteAgent(agent)}>
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Eliminar</TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
                       </div>
