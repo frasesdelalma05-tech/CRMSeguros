@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { useAppStore } from '@/lib/store'
 import { api, type AdminUser } from '@/lib/api'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -207,6 +207,7 @@ export default function AdminPage() {
   const [portfolioData, setPortfolioData] = useState<PortfolioData | null>(null)
   const [portfolioLoading, setPortfolioLoading] = useState(false)
   const [portfolioAgentId, setPortfolioAgentId] = useState<string | null>(null)
+  const [portfolioTab, setPortfolioTab] = useState('clients')
 
   // ---- General ----
   const [saving, setSaving] = useState(false)
@@ -643,11 +644,11 @@ export default function AdminPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label className="text-sm">{isEdit ? 'Nueva contraseña' : 'Contraseña temporal *'}</Label>
-            <PasswordInput
-              value={form.password}
-              onChange={(v) => setForm({ ...form, password: v } as any)}
-              placeholder={isEdit ? 'Dejar vacío para no cambiar' : 'Mínimo 8 caracteres'}
-            />
+            {PasswordInput({
+              value: form.password,
+              onChange: (v: string) => setForm({ ...form, password: v } as any),
+              placeholder: isEdit ? 'Dejar vacío para no cambiar' : 'Mínimo 8 caracteres'
+            })}
           </div>
           <div className="space-y-1.5">
             <Label className="text-sm">Confirmar contraseña {isEdit ? '' : '*'}</Label>
@@ -766,11 +767,11 @@ export default function AdminPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label className="text-sm">{isEdit ? 'Nueva contraseña' : 'Contraseña temporal *'}</Label>
-            <PasswordInput
-              value={form.password}
-              onChange={(v) => setForm({ ...form, password: v } as any)}
-              placeholder={isEdit ? 'Dejar vacío para no cambiar' : 'Mínimo 8 caracteres'}
-            />
+            {PasswordInput({
+              value: form.password,
+              onChange: (v: string) => setForm({ ...form, password: v } as any),
+              placeholder: isEdit ? 'Dejar vacío para no cambiar' : 'Mínimo 8 caracteres'
+            })}
           </div>
           <div className="space-y-1.5">
             <Label className="text-sm">Confirmar contraseña {isEdit ? '' : '*'}</Label>
@@ -836,11 +837,11 @@ export default function AdminPage() {
       </p>
       <div className="space-y-1.5">
         <Label className="text-sm">Nueva contraseña *</Label>
-        <PasswordInput
-          value={resetPasswordForm.newPassword}
-          onChange={(v) => setResetPasswordForm({ ...resetPasswordForm, newPassword: v })}
-          placeholder="Mínimo 8 caracteres"
-        />
+        {PasswordInput({
+          value: resetPasswordForm.newPassword,
+          onChange: (v: string) => setResetPasswordForm({ ...resetPasswordForm, newPassword: v }),
+          placeholder: 'Mínimo 8 caracteres'
+        })}
       </div>
       <div className="space-y-1.5">
         <Label className="text-sm">Confirmar contraseña *</Label>
@@ -859,7 +860,6 @@ export default function AdminPage() {
   // PORTFOLIO VIEW (Ficha de Corredor)
   // ============================================================
   const PortfolioContent = () => {
-    const [portfolioTab, setPortfolioTab] = useState('clients')
 
     if (portfolioLoading) {
       return (
@@ -1162,10 +1162,10 @@ export default function AdminPage() {
         <div className="space-y-6">
           <div className={`grid gap-4 ${isMobile ? 'grid-cols-2' : 'grid-cols-5'}`}>
             {Array.from({ length: isSuperAdmin ? 5 : 4 }).map((_, i) => (
-              <KpiSkeleton key={i} />
+              <Fragment key={i}>{KpiSkeleton()}</Fragment>
             ))}
           </div>
-          <TableSkeleton />
+          {TableSkeleton()}
         </div>
       )
     }
@@ -1555,7 +1555,7 @@ export default function AdminPage() {
 
         {/* Table */}
         {loadingAdmins ? (
-          <TableSkeleton />
+          <>{TableSkeleton()}</>
         ) : admins.length === 0 ? (
           <Card className="py-12">
             <p className="text-center text-muted-foreground">
@@ -1777,7 +1777,7 @@ export default function AdminPage() {
 
       {/* Table */}
       {loadingAgents ? (
-        <TableSkeleton />
+        <>{TableSkeleton()}</>
       ) : agents.length === 0 ? (
         <Card className="py-12">
           <p className="text-center text-muted-foreground">
@@ -1984,18 +1984,20 @@ export default function AdminPage() {
   // ============================================================
   // RENDER
   // ============================================================
-  const availableTabs = isSuperAdmin
-    ? [
-        { key: 'overview', label: 'Resumen', icon: TrendingUp },
-        { key: 'admins', label: 'Administradores', icon: Shield },
-        { key: 'agents', label: 'Corredores', icon: UserCheck },
-        { key: 'config', label: 'Configuración', icon: Settings },
-      ]
-    : [
-        { key: 'overview', label: 'Resumen', icon: TrendingUp },
-        { key: 'agents', label: 'Corredores', icon: UserCheck },
-        { key: 'config', label: 'Configuración', icon: Settings },
-      ]
+  const availableTabs = useMemo(() =>
+    isSuperAdmin
+      ? [
+          { key: 'overview', label: 'Resumen', icon: TrendingUp },
+          { key: 'admins', label: 'Administradores', icon: Shield },
+          { key: 'agents', label: 'Corredores', icon: UserCheck },
+          { key: 'config', label: 'Configuración', icon: Settings },
+        ]
+      : [
+          { key: 'overview', label: 'Resumen', icon: TrendingUp },
+          { key: 'agents', label: 'Corredores', icon: UserCheck },
+          { key: 'config', label: 'Configuración', icon: Settings },
+        ]
+  , [isSuperAdmin])
 
   return (
     <div className="space-y-6">
@@ -2021,21 +2023,21 @@ export default function AdminPage() {
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
-          <OverviewTab />
+          {OverviewTab()}
         </TabsContent>
 
         {isSuperAdmin && (
           <TabsContent value="admins" className="mt-4">
-            <AdminsTab />
+            {AdminsTab()}
           </TabsContent>
         )}
 
         <TabsContent value="agents" className="mt-4">
-          <AgentsTab />
+          {AgentsTab()}
         </TabsContent>
 
         <TabsContent value="config" className="mt-4">
-          <ConfigTab />
+          {ConfigTab()}
         </TabsContent>
       </Tabs>
 
@@ -2051,7 +2053,7 @@ export default function AdminPage() {
               <SheetTitle>Nuevo Administrador</SheetTitle>
             </SheetHeader>
             <div className="mt-4">
-              <AdminFormContent form={adminForm} setForm={setAdminForm} isEdit={false} />
+              {AdminFormContent({ form: adminForm, setForm: setAdminForm, isEdit: false })}
             </div>
             <div className="mt-4 flex gap-3">
               <Button variant="outline" className="flex-1 h-11" onClick={() => setCreateAdminOpen(false)}>Cancelar</Button>
@@ -2069,7 +2071,7 @@ export default function AdminPage() {
               <DialogTitle>Nuevo Administrador</DialogTitle>
               <DialogDescription>Crea una nueva cuenta de administrador de grupo</DialogDescription>
             </DialogHeader>
-            <AdminFormContent form={adminForm} setForm={setAdminForm} isEdit={false} />
+            {AdminFormContent({ form: adminForm, setForm: setAdminForm, isEdit: false })}
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateAdminOpen(false)}>Cancelar</Button>
               <Button onClick={handleCreateAdmin} disabled={saving}>
@@ -2089,7 +2091,7 @@ export default function AdminPage() {
               <SheetTitle>Editar Administrador</SheetTitle>
             </SheetHeader>
             <div className="mt-4">
-              <AdminFormContent form={editAdminForm} setForm={setEditAdminForm} isEdit={true} />
+              {AdminFormContent({ form: editAdminForm, setForm: setEditAdminForm, isEdit: true })}
             </div>
             <div className="mt-4 flex gap-3">
               <Button variant="outline" className="flex-1 h-11" onClick={() => setEditAdminOpen(false)}>Cancelar</Button>
@@ -2107,7 +2109,7 @@ export default function AdminPage() {
               <DialogTitle>Editar Administrador</DialogTitle>
               <DialogDescription>Modifica los datos del administrador</DialogDescription>
             </DialogHeader>
-            <AdminFormContent form={editAdminForm} setForm={setEditAdminForm} isEdit={true} />
+            {AdminFormContent({ form: editAdminForm, setForm: setEditAdminForm, isEdit: true })}
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditAdminOpen(false)}>Cancelar</Button>
               <Button onClick={handleUpdateAdmin} disabled={saving}>
@@ -2127,7 +2129,7 @@ export default function AdminPage() {
               <SheetTitle>Nuevo Corredor</SheetTitle>
             </SheetHeader>
             <div className="mt-4">
-              <AgentFormContent form={agentForm} setForm={setAgentForm} isEdit={false} />
+              {AgentFormContent({ form: agentForm, setForm: setAgentForm, isEdit: false })}
             </div>
             <div className="mt-4 flex gap-3">
               <Button variant="outline" className="flex-1 h-11" onClick={() => setCreateAgentOpen(false)}>Cancelar</Button>
@@ -2147,7 +2149,7 @@ export default function AdminPage() {
                 {isSuperAdmin ? 'Crea una nueva cuenta de corredor/agente' : 'Crea un nuevo corredor asignado a tu grupo'}
               </DialogDescription>
             </DialogHeader>
-            <AgentFormContent form={agentForm} setForm={setAgentForm} isEdit={false} />
+            {AgentFormContent({ form: agentForm, setForm: setAgentForm, isEdit: false })}
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateAgentOpen(false)}>Cancelar</Button>
               <Button onClick={handleCreateAgent} disabled={saving}>
@@ -2167,7 +2169,7 @@ export default function AdminPage() {
               <SheetTitle>Editar Corredor</SheetTitle>
             </SheetHeader>
             <div className="mt-4">
-              <AgentFormContent form={editAgentForm} setForm={setEditAgentForm} isEdit={true} />
+              {AgentFormContent({ form: editAgentForm, setForm: setEditAgentForm, isEdit: true })}
             </div>
             <div className="mt-4 flex gap-3">
               <Button variant="outline" className="flex-1 h-11" onClick={() => setEditAgentOpen(false)}>Cancelar</Button>
@@ -2185,7 +2187,7 @@ export default function AdminPage() {
               <DialogTitle>Editar Corredor</DialogTitle>
               <DialogDescription>Modifica los datos del corredor</DialogDescription>
             </DialogHeader>
-            <AgentFormContent form={editAgentForm} setForm={setEditAgentForm} isEdit={true} />
+            {AgentFormContent({ form: editAgentForm, setForm: setEditAgentForm, isEdit: true })}
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditAgentOpen(false)}>Cancelar</Button>
               <Button onClick={handleUpdateAgent} disabled={saving}>
@@ -2208,7 +2210,7 @@ export default function AdminPage() {
               </SheetTitle>
             </SheetHeader>
             <div className="mt-4">
-              <PortfolioContent />
+              {PortfolioContent()}
             </div>
           </SheetContent>
         </Sheet>
@@ -2223,7 +2225,7 @@ export default function AdminPage() {
               <DialogDescription>Detalle completo del corredor y su cartera</DialogDescription>
             </DialogHeader>
             <ScrollArea className="max-h-[65vh]">
-              <PortfolioContent />
+              {PortfolioContent()}
             </ScrollArea>
           </DialogContent>
         </Dialog>
@@ -2237,7 +2239,7 @@ export default function AdminPage() {
               <SheetTitle>Resetear Contraseña</SheetTitle>
             </SheetHeader>
             <div className="mt-4">
-              <ResetPasswordContent />
+              {ResetPasswordContent()}
             </div>
             <div className="mt-4 flex gap-3">
               <Button variant="outline" className="flex-1 h-11" onClick={() => setResetPasswordOpen(false)}>Cancelar</Button>
@@ -2255,7 +2257,7 @@ export default function AdminPage() {
               <DialogTitle>Resetear Contraseña</DialogTitle>
               <DialogDescription>Establece una nueva contraseña para el usuario</DialogDescription>
             </DialogHeader>
-            <ResetPasswordContent />
+            {ResetPasswordContent()}
             <DialogFooter>
               <Button variant="outline" onClick={() => setResetPasswordOpen(false)}>Cancelar</Button>
               <Button onClick={handleResetPassword} disabled={saving}>
