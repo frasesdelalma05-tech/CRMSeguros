@@ -63,9 +63,17 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    if (status === 'active') {
+    if (status === 'true') {
       where.isActive = true;
-    } else if (status === 'inactive') {
+    } else if (status === 'false') {
+      where.isActive = false;
+    }
+
+    // Also support isActive query param from frontend
+    const isActiveParam = searchParams.get('isActive');
+    if (isActiveParam === 'true') {
+      where.isActive = true;
+    } else if (isActiveParam === 'false') {
       where.isActive = false;
     }
 
@@ -178,7 +186,6 @@ export async function POST(request: NextRequest) {
       finalManagerId = requestedManagerId;
     } else if (isAdministrador(user.roleName)) {
       // administrador: managerId is auto-set to their own userId
-      // Cannot specify managerId
       if (requestedManagerId && requestedManagerId !== user.userId) {
         return NextResponse.json(
           { error: 'No puedes asignar un manager diferente a ti mismo' },
@@ -188,7 +195,7 @@ export async function POST(request: NextRequest) {
       finalManagerId = user.userId;
     }
 
-    // Check email uniqueness
+    // Check email uniqueness in our database
     const existing = await db.user.findUnique({ where: { email } });
     if (existing) {
       return NextResponse.json({ error: 'El email ya está registrado' }, { status: 409 });
@@ -200,18 +207,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Rol de corredor no encontrado' }, { status: 404 });
     }
 
-    // Create user in Supabase Auth first
+    // Try to create user in Supabase Auth (graceful fallback if unavailable)
     let supabaseId: string | null = null;
+    const supabase = createServerClient();
 
-    try {
-      const supabase = createServerClient();
-
-      const { data: listData } = await supabase.auth.admin.listUsers();
-      const existingAuthUser = listData?.users?.find((u) => u.email === email);
-
-      if (existingAuthUser) {
-        supabaseId = existingAuthUser.id;
-      } else {
+    if (supabase) {
+      try {
+        // Directly attempt createUser — avoids expensive listUsers() call
         const { data: authData, error: authError } = await supabase.auth.admin.createUser({
           email,
           password,
@@ -219,22 +221,38 @@ export async function POST(request: NextRequest) {
         });
 
         if (authError) {
-          return NextResponse.json(
-            { error: `Error al crear usuario en Supabase Auth: ${authError.message}` },
-            { status: 400 }
-          );
+          // If user already exists in Supabase Auth, try to find their ID
+          if (
+            authError.message.includes('already') ||
+            authError.message.includes('duplicate') ||
+            authError.message.includes('registered')
+          ) {
+            console.info('Supabase Auth user already exists for email:', email);
+            // Try listUsers as fallback to get existing user ID
+            try {
+              const { data: listData } = await supabase.auth.admin.listUsers();
+              const existingAuthUser = listData?.users?.find((u) => u.email === email);
+              if (existingAuthUser) {
+                supabaseId = existingAuthUser.id;
+              }
+            } catch (listErr) {
+              console.warn('Supabase Auth listUsers fallback failed:', listErr);
+            }
+          } else {
+            console.warn('Supabase Auth user creation failed:', authError.message);
+            console.warn('Falling back to legacy auth (bcrypt password only).');
+          }
+        } else {
+          supabaseId = authData.user?.id ?? null;
         }
-
-        supabaseId = authData.user?.id ?? null;
+      } catch (err) {
+        console.warn('Supabase Auth unavailable, using bcrypt fallback:', err);
       }
-    } catch {
-      return NextResponse.json(
-        { error: 'Error al crear usuario en Supabase Auth. El usuario no fue creado.' },
-        { status: 400 }
-      );
+    } else {
+      console.info('Supabase not configured. Using legacy auth (bcrypt password only).');
     }
 
-    // Hash password as fallback
+    // Hash password as fallback (always stored for dual-auth compatibility)
     const hashedPassword = await hashPassword(password);
 
     // Create user in our database
@@ -282,7 +300,7 @@ export async function POST(request: NextRequest) {
             lastName,
             roleName: 'corredor',
             managerId: finalManagerId,
-            method: 'supabase',
+            method: supabaseId ? 'supabase' : 'bcrypt',
           }),
         },
       });
