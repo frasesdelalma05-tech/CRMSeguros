@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "@/components/ui/toaster";
+import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -70,7 +70,6 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <head>
-        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="format-detection" content="telephone=no" />
       </head>
@@ -78,8 +77,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         {children}
-        <Toaster />
-        {/* Service Worker temporarily disabled for preview stability
+        <Toaster position="top-right" richColors closeButton duration={4000} />
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -91,7 +89,6 @@ export default function RootLayout({
             `,
           }}
         />
-        */}
       </body>
     </html>
   );
